@@ -1,6 +1,6 @@
 "use client";
 
-import { arbitrum, mainnet } from "@reown/appkit/networks";
+import { arbitrum } from "@reown/appkit/networks";
 import { createAppKit } from "@reown/appkit/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode, useEffect } from "react";
@@ -39,8 +39,8 @@ export default function ContextProvider({
       modal = createAppKit({
         adapters: [wagmiAdapter],
         projectId,
-        networks: [mainnet, arbitrum],
-        defaultNetwork: mainnet,
+        networks: [arbitrum],
+        defaultNetwork: arbitrum,
         metadata,
         features: {
           analytics: true, // Optional - defaults to your Cloud configuration

@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
-import localFont from "next/font/local";
 import { Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
+
+import { Navbar } from "@/components/navigation/navbar";
 import "./globals.css";
 
 const gilroy = localFont({
@@ -48,8 +50,13 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${gilroy.variable} ${geistMono.variable} antialiased`}>
-        {children}
+      <body
+        className={`${gilroy.variable} ${geistMono.variable} bg-background text-foreground antialiased`}
+      >
+        <div className="flex min-h-screen flex-col">
+          <Navbar />
+          <main className="flex-1">{children}</main>
+        </div>
       </body>
     </html>
   );

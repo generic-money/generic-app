@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Geist_Mono } from "next/font/google";
 import localFont from "next/font/local";
 
 import { headers } from "next/headers";
@@ -31,11 +30,6 @@ const gilroy = localFont({
   display: "swap",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
 export const metadata: Metadata = {
   title: "Generic Money",
   description: "Generic Money dashboard",
@@ -58,7 +52,7 @@ export default async function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${gilroy.variable} ${geistMono.variable} bg-background text-foreground antialiased`}
+        className={`${gilroy.variable} bg-background text-foreground antialiased`}
       >
         <ContextProvider cookies={cookies}>
           <div className="flex min-h-screen flex-col">

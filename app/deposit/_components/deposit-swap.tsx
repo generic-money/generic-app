@@ -4,7 +4,7 @@ import { ArrowUpDown } from "lucide-react";
 import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import { arbitrum } from "viem/chains";
-import { useAccount, useBalance, useBlockNumber } from "wagmi";
+import { useAccount, useBalance } from "wagmi";
 
 import {
   Select,
@@ -15,11 +15,13 @@ import {
 } from "@/components/ui/select";
 import type { StablecoinTicker } from "@/lib/constants/stablecoins";
 import { gusd, stablecoins } from "@/lib/models/tokens";
+import type { HexAddress } from "./constants";
+import { useErc20Decimals } from "./hooks/useErc20Decimals";
+import { useErc4626Preview } from "./hooks/useErc4626Preview";
 import { SwapAssetPanel } from "./swap-asset-panel";
+import { formatBalanceText } from "./utils/format";
 
 type AssetType = "stablecoin" | "gusd";
-
-type BalanceResult = ReturnType<typeof useBalance>;
 
 const TokenIcon = ({ src, alt }: { src: string; alt: string }) => (
   <Image
@@ -57,16 +59,19 @@ export function DepositSwap() {
 
   const gusdAddress = gusd.getAddress();
 
-  const { data: latestBlockNumber } = useBlockNumber({
-    chainId: arbitrum.id,
-    watch: Boolean(accountAddress),
-  });
+  const stablecoinAddress = selectedStablecoin?.tokenAddress;
+  const vaultAddress = selectedStablecoin?.depositVaultAddress as
+    | HexAddress
+    | undefined;
+
+  const { decimals: stablecoinDecimals } = useErc20Decimals(stablecoinAddress);
+  const { decimals: gusdDecimals } = useErc20Decimals(gusdAddress);
 
   const stablecoinBalance = useBalance({
     address: accountAddress,
     token: selectedStablecoin?.tokenAddress,
     chainId: arbitrum.id,
-    blockNumber: latestBlockNumber,
+    watch: Boolean(accountAddress && selectedStablecoin?.tokenAddress),
     query: {
       enabled: Boolean(accountAddress && selectedStablecoin?.tokenAddress),
     },
@@ -76,7 +81,7 @@ export function DepositSwap() {
     address: accountAddress,
     token: gusdAddress,
     chainId: arbitrum.id,
-    blockNumber: latestBlockNumber,
+    watch: Boolean(accountAddress && gusdAddress),
     query: {
       enabled: Boolean(accountAddress && gusdAddress),
     },
@@ -90,43 +95,8 @@ export function DepositSwap() {
     setFromAmount("");
   }, [selectedTicker, isDepositFlow]);
 
-  const formatBalanceText = (balanceResult: BalanceResult) => {
-    if (!accountAddress) {
-      return "Balance: —";
-    }
-
-    if (balanceResult.isLoading) {
-      return "Balance: loading…";
-    }
-
-    if (balanceResult.isError) {
-      return "Balance: unavailable";
-    }
-
-    const formatted = balanceResult.data?.formatted;
-    if (!formatted) {
-      return "Balance: $0.00";
-    }
-
-    const numericValue = Number.parseFloat(formatted);
-    if (!Number.isFinite(numericValue) || numericValue === 0) {
-      return "Balance: $0.00";
-    }
-
-    if (numericValue < 0.0001) {
-      return "Balance: <$0.0001";
-    }
-
-    const decimalPlaces = numericValue >= 1 ? 2 : 4;
-
-    return `Balance: $${numericValue.toLocaleString("en-US", {
-      minimumFractionDigits: decimalPlaces,
-      maximumFractionDigits: decimalPlaces,
-    })}`;
-  };
-
-  const fromBalanceText = formatBalanceText(fromBalanceHook);
-  const toBalanceText = formatBalanceText(toBalanceHook);
+  const fromBalanceText = formatBalanceText(fromBalanceHook, accountAddress);
+  const toBalanceText = formatBalanceText(toBalanceHook, accountAddress);
   const canUseMax =
     Boolean(accountAddress) && Boolean(fromBalanceHook.data?.formatted);
 
@@ -136,6 +106,17 @@ export function DepositSwap() {
       setFromAmount(value);
     }
   };
+
+  const fromDecimals = isDepositFlow ? stablecoinDecimals : gusdDecimals;
+  const toDecimals = isDepositFlow ? gusdDecimals : stablecoinDecimals;
+
+  const { quote: estimatedToAmount } = useErc4626Preview({
+    amount: fromAmount,
+    fromDecimals,
+    toDecimals,
+    vaultAddress,
+    mode: isDepositFlow ? "deposit" : "redeem",
+  });
 
   const renderAssetSelector = (assetType: AssetType) => {
     if (assetType === "stablecoin") {
@@ -224,6 +205,8 @@ export function DepositSwap() {
                   ? "Amount in GUSD"
                   : `Amount in ${selectedStablecoin?.ticker ?? ""}`,
                 disabled: true,
+                readOnly: true,
+                value: estimatedToAmount,
               }}
               balance={{
                 text: toBalanceText,

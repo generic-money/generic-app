@@ -3,9 +3,17 @@
 import { ArrowUpDown } from "lucide-react";
 import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
+import { erc20Abi, erc4626Abi } from "viem";
 import { arbitrum } from "viem/chains";
-import { useAccount, useBalance } from "wagmi";
+import {
+  useAccount,
+  useBalance,
+  usePublicClient,
+  useWriteContract,
+} from "wagmi";
 
+import genericDepositorArtifact from "@/artifacts/GenericDepositorABI.sol.json";
+import whitelabeledUnitArtifact from "@/artifacts/WhitelabeledUnitABI.sol.json";
 import {
   Select,
   SelectContent,
@@ -13,13 +21,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { getGenericDepositorAddress } from "@/lib/constants/contracts";
 import type { StablecoinTicker } from "@/lib/constants/stablecoins";
 import { gusd, stablecoins } from "@/lib/models/tokens";
-import type { HexAddress } from "./constants";
+import type { HexAddress } from "@/lib/types/address";
 import { useErc20Decimals } from "./hooks/useErc20Decimals";
 import { useErc4626Preview } from "./hooks/useErc4626Preview";
+import { useTokenAllowance } from "./hooks/useTokenAllowance";
 import { SwapAssetPanel } from "./swap-asset-panel";
 import { formatBalanceText } from "./utils/format";
+
+const depositorAbi =
+  genericDepositorArtifact.abi as typeof genericDepositorArtifact.abi;
+const whitelabeledUnitAbi =
+  whitelabeledUnitArtifact.abi as typeof whitelabeledUnitArtifact.abi;
 
 type AssetType = "stablecoin" | "gusd";
 
@@ -36,11 +51,17 @@ const TokenIcon = ({ src, alt }: { src: string; alt: string }) => (
 
 export function DepositSwap() {
   const { address: accountAddress } = useAccount();
+  const publicClient = usePublicClient({ chainId: arbitrum.id });
+  const { writeContractAsync } = useWriteContract();
   const [selectedTicker, setSelectedTicker] = useState<StablecoinTicker>(
     stablecoins[0]?.ticker ?? "USDC",
   );
   const [isDepositFlow, setIsDepositFlow] = useState(true);
   const [fromAmount, setFromAmount] = useState("");
+  const [txStep, setTxStep] = useState<"idle" | "approving" | "submitting">(
+    "idle",
+  );
+  const [txError, setTxError] = useState<string | null>(null);
 
   const selectedStablecoin = useMemo(
     () =>
@@ -66,6 +87,8 @@ export function DepositSwap() {
 
   const { decimals: stablecoinDecimals } = useErc20Decimals(stablecoinAddress);
   const { decimals: gusdDecimals } = useErc20Decimals(gusdAddress);
+
+  const depositorAddress = getGenericDepositorAddress();
 
   const stablecoinBalance = useBalance({
     address: accountAddress,
@@ -110,13 +133,201 @@ export function DepositSwap() {
   const fromDecimals = isDepositFlow ? stablecoinDecimals : gusdDecimals;
   const toDecimals = isDepositFlow ? gusdDecimals : stablecoinDecimals;
 
-  const { quote: estimatedToAmount } = useErc4626Preview({
+  const { quote: estimatedToAmount, parsedAmount } = useErc4626Preview({
     amount: fromAmount,
     fromDecimals,
     toDecimals,
     vaultAddress,
     mode: isDepositFlow ? "deposit" : "redeem",
   });
+
+  const {
+    allowance: depositAllowance,
+    refetchAllowance: refetchDepositAllowance,
+  } = useTokenAllowance({
+    token: stablecoinAddress,
+    owner: accountAddress,
+    spender: depositorAddress,
+  });
+
+  const needsApproval = useMemo(() => {
+    if (!parsedAmount || !isDepositFlow) {
+      return false;
+    }
+
+    return depositAllowance < parsedAmount;
+  }, [depositAllowance, isDepositFlow, parsedAmount]);
+
+  const buttonState = useMemo(() => {
+    const actionLabel = isDepositFlow ? "Deposit" : "Redeem";
+
+    if (!accountAddress) {
+      return { label: "Connect wallet", disabled: true };
+    }
+
+    if (isDepositFlow) {
+      if (!stablecoinAddress) {
+        return { label: "Select asset", disabled: true };
+      }
+
+      if (!depositorAddress) {
+        return { label: "Depositor unavailable", disabled: true };
+      }
+    } else {
+      if (!gusdAddress) {
+        return { label: "GUSD unavailable", disabled: true };
+      }
+
+      if (!vaultAddress) {
+        return { label: "Vault unavailable", disabled: true };
+      }
+    }
+
+    if (!parsedAmount || parsedAmount <= 0n) {
+      return { label: "Enter amount", disabled: true };
+    }
+
+    if (txStep === "approving") {
+      return { label: "Approving…", disabled: true };
+    }
+
+    if (txStep === "submitting") {
+      return { label: `${actionLabel}…`, disabled: true };
+    }
+
+    if (needsApproval) {
+      return { label: `Approve & ${actionLabel}`, disabled: false };
+    }
+
+    return { label: actionLabel, disabled: false };
+  }, [
+    accountAddress,
+    depositorAddress,
+    gusdAddress,
+    isDepositFlow,
+    needsApproval,
+    parsedAmount,
+    stablecoinAddress,
+    txStep,
+    vaultAddress,
+  ]);
+
+  const handleDeposit = async () => {
+    if (
+      !accountAddress ||
+      !stablecoinAddress ||
+      !gusdAddress ||
+      !parsedAmount ||
+      parsedAmount <= 0n ||
+      !depositorAddress ||
+      !publicClient
+    ) {
+      return;
+    }
+
+    setTxError(null);
+
+    try {
+      if (depositAllowance < parsedAmount) {
+        setTxStep("approving");
+        const approvalHash = await writeContractAsync({
+          abi: erc20Abi,
+          address: stablecoinAddress,
+          chainId: arbitrum.id,
+          functionName: "approve",
+          args: [depositorAddress, parsedAmount],
+        });
+        await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+        await refetchDepositAllowance?.();
+      }
+
+      setTxStep("submitting");
+      const depositHash = await writeContractAsync({
+        abi: depositorAbi,
+        address: depositorAddress,
+        chainId: arbitrum.id,
+        functionName: "deposit",
+        args: [stablecoinAddress, gusdAddress, parsedAmount],
+      });
+      await publicClient.waitForTransactionReceipt({ hash: depositHash });
+
+      setFromAmount("");
+      const balanceRefetches: Promise<unknown>[] = [];
+      if (stablecoinBalance.refetch) {
+        balanceRefetches.push(stablecoinBalance.refetch());
+      }
+      if (gusdBalance.refetch) {
+        balanceRefetches.push(gusdBalance.refetch());
+      }
+      if (balanceRefetches.length) {
+        await Promise.allSettled(balanceRefetches);
+      }
+    } catch (error) {
+      setTxError(error instanceof Error ? error.message : "Transaction failed");
+    } finally {
+      setTxStep("idle");
+    }
+  };
+
+  const handleRedeem = async () => {
+    if (
+      !accountAddress ||
+      !vaultAddress ||
+      !gusdAddress ||
+      !parsedAmount ||
+      parsedAmount <= 0n ||
+      !publicClient
+    ) {
+      return;
+    }
+
+    setTxError(null);
+
+    try {
+      setTxStep("submitting");
+      const unwrapHash = await writeContractAsync({
+        abi: whitelabeledUnitAbi,
+        address: gusdAddress,
+        chainId: arbitrum.id,
+        functionName: "unwrap",
+        args: [accountAddress, accountAddress, parsedAmount],
+      });
+      await publicClient.waitForTransactionReceipt({ hash: unwrapHash });
+
+      const redeemHash = await writeContractAsync({
+        abi: erc4626Abi,
+        address: vaultAddress,
+        chainId: arbitrum.id,
+        functionName: "redeem",
+        args: [parsedAmount, accountAddress, accountAddress],
+      });
+      await publicClient.waitForTransactionReceipt({ hash: redeemHash });
+
+      setFromAmount("");
+      const balanceRefetches: Promise<unknown>[] = [];
+      if (stablecoinBalance.refetch) {
+        balanceRefetches.push(stablecoinBalance.refetch());
+      }
+      if (gusdBalance.refetch) {
+        balanceRefetches.push(gusdBalance.refetch());
+      }
+      if (balanceRefetches.length) {
+        await Promise.allSettled(balanceRefetches);
+      }
+    } catch (error) {
+      setTxError(error instanceof Error ? error.message : "Transaction failed");
+    } finally {
+      setTxStep("idle");
+    }
+  };
+
+  const handlePrimaryAction = async () => {
+    if (isDepositFlow) {
+      await handleDeposit();
+    } else {
+      await handleRedeem();
+    }
+  };
 
   const renderAssetSelector = (assetType: AssetType) => {
     if (assetType === "stablecoin") {
@@ -215,10 +426,15 @@ export function DepositSwap() {
           </div>
           <button
             type="button"
-            className="h-11 rounded-xl bg-gradient-to-r from-primary via-primary/90 to-primary/95 text-sm font-semibold text-primary-foreground transition hover:from-primary/90 hover:via-primary/80 hover:to-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            onClick={handlePrimaryAction}
+            disabled={buttonState.disabled}
+            className="h-11 rounded-xl bg-gradient-to-r from-primary via-primary/90 to-primary/95 text-sm font-semibold text-primary-foreground transition hover:from-primary/90 hover:via-primary/80 hover:to-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {isDepositFlow ? "Deposit" : "Redeem"}
+            {buttonState.label}
           </button>
+          {txError ? (
+            <p className="text-center text-xs text-destructive">{txError}</p>
+          ) : null}
         </div>
       </div>
     </div>

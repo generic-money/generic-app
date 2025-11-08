@@ -2,7 +2,7 @@ import { erc20Abi } from "viem";
 import { arbitrum } from "viem/chains";
 import { useReadContract } from "wagmi";
 
-import { type HexAddress, ZERO_ADDRESS } from "../constants";
+import { type HexAddress, ZERO_ADDRESS } from "@/lib/types/address";
 
 type Address = HexAddress | undefined;
 

@@ -3,7 +3,7 @@ import { erc4626Abi, formatUnits, parseUnits } from "viem";
 import { arbitrum } from "viem/chains";
 import { useReadContract } from "wagmi";
 
-import { type HexAddress, ZERO_ADDRESS } from "../constants";
+import { type HexAddress, ZERO_ADDRESS } from "@/lib/types/address";
 import { formatTokenAmount } from "../utils/format";
 
 type Mode = "deposit" | "redeem";

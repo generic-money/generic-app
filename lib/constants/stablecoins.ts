@@ -2,7 +2,7 @@ import type { ChainName } from "./chains";
 
 type Address = `0x${string}`;
 
-export type StablecoinTicker = "USDC" | "USDT", "USDS";
+export type StablecoinTicker = "USDC" | "USDT" | "USDS";
 
 type StablecoinChainConfig = {
   tokenAddress: Address;

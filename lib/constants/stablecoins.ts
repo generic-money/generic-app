@@ -64,7 +64,7 @@ export const GUSD_DEFINITION = {
   conversionValue: 1,
   iconUrl: "/tokens/gusd.svg",
   chains: {
-    mainnet: "0xd8495139625d5589e5CB5eD54284D05EA1aa7eFd",
+    mainnet: "0xece811d35f79C4868a2B911E55D9aa0821399EDF",
   },
 } as const satisfies MultichainTokenDefinition<"GUSD">;
 

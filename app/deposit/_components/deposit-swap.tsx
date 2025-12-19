@@ -167,11 +167,7 @@ export function DepositSwap() {
     },
   });
 
-  const fromAssetType: AssetType = isDepositFlow
-    ? isPredepositDeposit
-      ? "gusd"
-      : "stablecoin"
-    : "gusd";
+  const fromAssetType: AssetType = isDepositFlow ? "stablecoin" : "gusd";
 
   const toAssetType: AssetType = isDepositFlow ? "gusd" : "stablecoin";
 
@@ -212,9 +208,7 @@ export function DepositSwap() {
 
   const estimatedToAmount = isPredepositDeposit ? fromAmount : previewToAmount;
 
-  const depositTokenAddress = isPredepositDeposit
-    ? gusdAddress
-    : stablecoinAddress;
+  const depositTokenAddress = stablecoinAddress;
 
   const {
     allowance: depositAllowance,
@@ -271,8 +265,8 @@ export function DepositSwap() {
       }
 
       if (isPredepositDeposit) {
-        if (!gusdAddress) {
-          return { label: "GUSD unavailable", disabled: true };
+        if (!stablecoinAddress) {
+          return { label: "Select asset", disabled: true };
         }
       } else {
         if (!stablecoinAddress) {
@@ -343,14 +337,19 @@ export function DepositSwap() {
 
     try {
       if (depositAllowance < parsedAmount) {
-        const approvalToken = isPredepositDeposit
-          ? gusdAddress
-          : stablecoinAddress;
+        const approvalToken = stablecoinAddress;
         if (!approvalToken) {
           return;
         }
 
         setTxStep("approving");
+        console.info("Deposit approval call", {
+          functionName: "approve",
+          address: approvalToken,
+          chainId: mainnet.id,
+          args: [depositorAddress, parsedAmount],
+          route: isPredepositDeposit ? "predeposit" : "mainnet",
+        });
         const approvalHash = await writeContractAsync({
           abi: erc20Abi,
           address: approvalToken,
@@ -365,18 +364,30 @@ export function DepositSwap() {
       setTxStep("submitting");
       let depositHash: HexBytes;
       if (isPredepositDeposit) {
-        if (!gusdAddress) {
+        if (!stablecoinAddress) {
           return;
         }
         const remoteRecipient = toBytes32(accountAddress);
 
+        console.info("Predeposit call", {
+          functionName: "depositAndPredeposit",
+          address: depositorAddress,
+          chainId: mainnet.id,
+          assets: parsedAmount,
+          args: [
+            stablecoinAddress,
+            parsedAmount,
+            PREDEPOSIT_CHAIN_NICKNAME,
+            remoteRecipient,
+          ],
+        });
         depositHash = await writeContractAsync({
           abi: depositorAbi,
           address: depositorAddress,
           chainId: mainnet.id,
           functionName: "depositAndPredeposit",
           args: [
-            gusdAddress,
+            stablecoinAddress,
             parsedAmount,
             PREDEPOSIT_CHAIN_NICKNAME,
             remoteRecipient,
@@ -386,6 +397,12 @@ export function DepositSwap() {
         if (!stablecoinAddress || !gusdAddress) {
           return;
         }
+        console.info("Deposit call", {
+          functionName: "deposit",
+          address: depositorAddress,
+          chainId: mainnet.id,
+          args: [stablecoinAddress, gusdAddress, parsedAmount],
+        });
         depositHash = await writeContractAsync({
           abi: depositorAbi,
           address: depositorAddress,
@@ -592,17 +609,11 @@ export function DepositSwap() {
             <SwapAssetPanel
               label="From"
               selector={renderAssetSelector(
-                isDepositFlow
-                  ? depositRoute === "predeposit"
-                    ? "gusd"
-                    : "stablecoin"
-                  : "gusd",
+                isDepositFlow ? "stablecoin" : "gusd",
               )}
               inputProps={{
                 placeholder: isDepositFlow
-                  ? depositRoute === "predeposit"
-                    ? "Amount in GUSD"
-                    : `Amount in ${selectedStablecoin?.ticker ?? ""}`
+                  ? `Amount in ${selectedStablecoin?.ticker ?? ""}`
                   : "Amount in GUSD",
                 autoComplete: "off",
                 value: fromAmount,

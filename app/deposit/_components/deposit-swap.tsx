@@ -25,6 +25,7 @@ import {
   getGenericDepositorAddress,
   getGenericUnitTokenAddress,
 } from "@/lib/constants/contracts";
+import { PREDEPOSIT_CHAIN_NICKNAME } from "@/lib/constants/predeposit";
 import type { StablecoinTicker } from "@/lib/constants/stablecoins";
 import { gusd, stablecoins } from "@/lib/models/tokens";
 import type { HexAddress } from "@/lib/types/address";
@@ -42,12 +43,8 @@ const whitelabeledUnitAbi =
 
 type AssetType = "stablecoin" | "gusd";
 type DepositRoute = "predeposit" | "mainnet";
-type HexBytes = `0x${string}`;
-
 const ZERO_AMOUNT = BigInt(0);
-
-const PREDEPOSIT_CHAIN_NICKNAME =
-  "0xa4fdc657c7ba2402ba336e88c4ae1c72169f7bc116987c8aefd50982676d9a17" as const satisfies HexBytes;
+type HexBytes = `0x${string}`;
 
 const toBytes32 = (value: HexBytes) =>
   `0x${value.slice(2).padStart(64, "0")}` as const;
@@ -652,7 +649,7 @@ export function DepositSwap() {
             />
           </div>
           {isDepositFlow ? (
-            <fieldset className="flex flex-wrap items-center gap-2">
+            <fieldset className="flex flex-wrap items-center justify-center gap-2">
               <legend className="sr-only">Deposit route</legend>
               <Chip
                 label="Predeposit"

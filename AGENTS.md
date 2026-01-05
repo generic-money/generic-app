@@ -8,6 +8,7 @@ The application follows the Next.js 16 App Router layout. Core UI lives under `a
 - `bun run build` or `npm run build`: create the production bundle and surface type errors.  
 - `bun start` or `npm start`: run the production build locally for smoke testing.  
 - `bun lint` or `npm run lint`: execute ESLint using `eslint.config.mjs`.
+- After all edits, run the checker (`bun run lint` or `npm run lint`) before handing off.
 
 ## Coding Style & Naming Conventions
 We use TypeScript with strict typing. Favor React 19 hooks (`use`, `useState`, `useEffect`) and Next.js server components where appropriate. Stick to function components; co-locate component styles via Tailwind utility classes. Use PascalCase for components (`ButtonGroup.tsx`), camelCase for hooks/utilities (`useTheme.ts`). Prefer 2-space indentation (default from Next.js). Run `npm run lint` before pushing; it enforces formatting and accessibility checks.

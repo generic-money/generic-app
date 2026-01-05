@@ -25,6 +25,5 @@ const GENERIC_UNIT_TOKEN_ADDRESSES: Partial<Record<ChainName, HexAddress>> = {
 export const getGenericDepositorAddress = (chain: ChainName = DEFAULT_CHAIN) =>
   GENERIC_DEPOSITOR_ADDRESSES[chain];
 
-export const getGenericUnitTokenAddress = (
-  chain: ChainName = DEFAULT_CHAIN,
-) => GENERIC_UNIT_TOKEN_ADDRESSES[chain];
+export const getGenericUnitTokenAddress = (chain: ChainName = DEFAULT_CHAIN) =>
+  GENERIC_UNIT_TOKEN_ADDRESSES[chain];

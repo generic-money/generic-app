@@ -115,7 +115,11 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
     abi: bridgeCoordinatorAbi,
     chainId: mainnet.id,
     functionName: "getPredeposit",
-    args: [PREDEPOSIT_CHAIN_NICKNAME, predepositSender, predepositRecipient] as const,
+    args: [
+      PREDEPOSIT_CHAIN_NICKNAME,
+      predepositSender,
+      predepositRecipient,
+    ] as const,
     query: {
       enabled: predepositEnabled,
     },
@@ -194,6 +198,7 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
   const positionsCount = accountAddress
     ? [hasUnits, hasGusd, hasPredeposit].filter(Boolean).length
     : 0;
+  const showEmptyState = positionsCount === 0;
 
   return (
     <aside
@@ -257,6 +262,16 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
                 <p className="mt-2 text-lg font-semibold text-white">
                   {predepositValue}
                 </p>
+              </div>
+            ) : null}
+            {showEmptyState ? (
+              <div className="flex min-h-[110px] flex-col items-center justify-center rounded-2xl border border-dashed border-border/60 bg-muted/30 p-4 text-center text-sm text-muted-foreground">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.22em]">
+                  No positions
+                </span>
+                <span className="mt-2 text-xs font-medium text-muted-foreground/80">
+                  Deposits will appear here.
+                </span>
               </div>
             ) : null}
           </div>

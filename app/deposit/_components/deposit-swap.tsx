@@ -21,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { pushAlert } from "@/lib/alerts";
 import {
   getGenericDepositorAddress,
   getGenericUnitTokenAddress,
@@ -48,6 +49,25 @@ type HexBytes = `0x${string}`;
 
 const toBytes32 = (value: HexBytes) =>
   `0x${value.slice(2).padStart(64, "0")}` as const;
+
+const formatTxHash = (hash: HexBytes) =>
+  `${hash.slice(0, 6)}...${hash.slice(-4)}`;
+
+const notifyTxSubmitted = (label: string, hash: HexBytes) => {
+  pushAlert({
+    type: "info",
+    title: `${label} submitted`,
+    message: `Hash ${formatTxHash(hash)}`,
+  });
+};
+
+const notifyTxConfirmed = (label: string, hash: HexBytes) => {
+  pushAlert({
+    type: "success",
+    title: `${label} confirmed`,
+    message: `Hash ${formatTxHash(hash)}`,
+  });
+};
 
 const TokenIcon = ({ src, alt }: { src: string; alt: string }) => (
   // biome-ignore lint/performance/noImgElement: token icons use local static assets and are not LCP-critical
@@ -354,7 +374,9 @@ export function DepositSwap() {
           functionName: "approve",
           args: [depositorAddress, parsedAmount],
         });
+        notifyTxSubmitted("Approval", approvalHash);
         await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+        notifyTxConfirmed("Approval", approvalHash);
         await refetchDepositAllowance?.();
       }
 
@@ -408,7 +430,15 @@ export function DepositSwap() {
           args: [stablecoinAddress, gusdAddress, parsedAmount],
         });
       }
+      notifyTxSubmitted(
+        isPredepositDeposit ? "Predeposit" : "Deposit",
+        depositHash,
+      );
       await publicClient.waitForTransactionReceipt({ hash: depositHash });
+      notifyTxConfirmed(
+        isPredepositDeposit ? "Predeposit" : "Deposit",
+        depositHash,
+      );
 
       setFromAmount("");
       const balanceRefetches: Promise<unknown>[] = [];
@@ -422,7 +452,14 @@ export function DepositSwap() {
         await Promise.allSettled(balanceRefetches);
       }
     } catch (error) {
-      setTxError(error instanceof Error ? error.message : "Transaction failed");
+      const message =
+        error instanceof Error ? error.message : "Transaction failed";
+      setTxError(message);
+      pushAlert({
+        type: "error",
+        title: "Transaction failed",
+        message,
+      });
     } finally {
       setTxStep("idle");
     }
@@ -465,7 +502,9 @@ export function DepositSwap() {
         functionName: "unwrap",
         args: [accountAddress, accountAddress, parsedAmount],
       });
+      notifyTxSubmitted("Unwrap", unwrapHash);
       await publicClient.waitForTransactionReceipt({ hash: unwrapHash });
+      notifyTxConfirmed("Unwrap", unwrapHash);
 
       const balanceAfter = await publicClient.readContract({
         abi: erc20Abi,
@@ -482,6 +521,11 @@ export function DepositSwap() {
 
       if (redeemShares <= ZERO_AMOUNT) {
         setTxError("No generic unit tokens available to redeem");
+        pushAlert({
+          type: "warning",
+          title: "Redeem unavailable",
+          message: "No generic unit tokens available to redeem.",
+        });
         return;
       }
 
@@ -507,7 +551,9 @@ export function DepositSwap() {
           functionName: "approve",
           args: [vaultAddress, redeemShares],
         });
+        notifyTxSubmitted("Approval", approvalHash);
         await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+        notifyTxConfirmed("Approval", approvalHash);
         await refetchRedeemAllowance?.();
       }
 
@@ -525,7 +571,9 @@ export function DepositSwap() {
         functionName: "redeem",
         args: [redeemShares, accountAddress, accountAddress],
       });
+      notifyTxSubmitted("Redeem", redeemHash);
       await publicClient.waitForTransactionReceipt({ hash: redeemHash });
+      notifyTxConfirmed("Redeem", redeemHash);
 
       setFromAmount("");
       const balanceRefetches: Promise<unknown>[] = [];
@@ -539,7 +587,14 @@ export function DepositSwap() {
         await Promise.allSettled(balanceRefetches);
       }
     } catch (error) {
-      setTxError(error instanceof Error ? error.message : "Transaction failed");
+      const message =
+        error instanceof Error ? error.message : "Transaction failed";
+      setTxError(message);
+      pushAlert({
+        type: "error",
+        title: "Transaction failed",
+        message,
+      });
     } finally {
       setTxStep("idle");
     }

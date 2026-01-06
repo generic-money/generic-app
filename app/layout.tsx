@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 
 import { Footer } from "@/components/navigation/footer";
 import { Navbar } from "@/components/navigation/navbar";
+import { Toaster } from "@/components/ui/sonner";
 import ContextProvider from "@/context";
 import "./globals.css";
 
@@ -60,6 +61,7 @@ export default async function RootLayout({
             <main className="flex-1">{children}</main>
             <Footer />
           </div>
+          <Toaster position="top-right" closeButton />
         </ContextProvider>
       </body>
     </html>

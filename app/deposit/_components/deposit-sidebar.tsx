@@ -13,12 +13,11 @@ import { useAccount, useBalance, useChainId, useReadContract } from "wagmi";
 
 import {
   CHAIN_ID_BY_NAME,
-  CHAINS,
   getChainNameById,
 } from "@/lib/constants/chains";
 import { getGenericUnitTokenAddress } from "@/lib/constants/contracts";
 import {
-  BRIDGE_COORDINATOR_L1_ADDRESS,
+  getBridgeCoordinatorAddress,
   PREDEPOSIT_CHAIN_NICKNAME,
 } from "@/lib/constants/predeposit";
 import { gusd } from "@/lib/models/tokens";
@@ -57,6 +56,8 @@ type BalanceLike = {
   } | null;
 };
 
+const POSITION_PRECISION = 4;
+
 const formatTokenBalance = (balance: BalanceLike, accountAddress?: string) => {
   if (!accountAddress) {
     return "—";
@@ -76,7 +77,15 @@ const formatTokenBalance = (balance: BalanceLike, accountAddress?: string) => {
     return `0 ${symbol}`.trim();
   }
 
-  return `${formatTokenAmount(formatted)} ${symbol}`.trim();
+  return `${formatTokenAmount(formatted, POSITION_PRECISION)} ${symbol}`.trim();
+};
+
+const formatPositionValue = (value: string) => {
+  if (value === "—" || value === "Loading…" || value === "Unavailable") {
+    return value;
+  }
+
+  return value.startsWith("$") ? value : `$${value}`;
 };
 
 export function DepositSidebar({ className }: DepositSidebarProps = {}) {
@@ -87,7 +96,8 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
   const genericUnitTokenAddress = getGenericUnitTokenAddress(chainName);
   const gusdAddress = gusd.getAddress(chainName);
   const { decimals: unitDecimals } = useErc20Decimals(genericUnitTokenAddress);
-  const mainnetChainId = CHAIN_ID_BY_NAME[CHAINS.MAINNET];
+  const predepositChainId = CHAIN_ID_BY_NAME[chainName];
+  const bridgeCoordinatorAddress = getBridgeCoordinatorAddress(chainName);
 
   const unitBalance = useBalance({
     address: accountAddress,
@@ -118,9 +128,9 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
     isError: isPredepositError,
     error: predepositError,
   } = useReadContract({
-    address: BRIDGE_COORDINATOR_L1_ADDRESS,
+    address: bridgeCoordinatorAddress,
     abi: bridgeCoordinatorAbi,
-    chainId: mainnetChainId,
+    chainId: predepositChainId,
     functionName: "getPredeposit",
     args: [
       PREDEPOSIT_CHAIN_NICKNAME,
@@ -138,12 +148,18 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
     }
 
     console.info("Predeposit read", {
-      address: BRIDGE_COORDINATOR_L1_ADDRESS,
-      chainId: mainnetChainId,
+      address: bridgeCoordinatorAddress,
+      chainId: predepositChainId,
       args: [PREDEPOSIT_CHAIN_NICKNAME, accountAddress, predepositRecipient],
       enabled: predepositEnabled,
     });
-  }, [accountAddress, mainnetChainId, predepositEnabled, predepositRecipient]);
+  }, [
+    accountAddress,
+    bridgeCoordinatorAddress,
+    predepositChainId,
+    predepositEnabled,
+    predepositRecipient,
+  ]);
 
   useEffect(() => {
     if (!predepositError) {
@@ -165,12 +181,14 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
   }, [predepositAmount, unitDecimals]);
 
   const unitBalanceValue = useMemo(
-    () => formatTokenBalance(unitBalance, accountAddress),
+    () =>
+      formatPositionValue(formatTokenBalance(unitBalance, accountAddress)),
     [accountAddress, unitBalance],
   );
 
   const gusdBalanceValue = useMemo(
-    () => formatTokenBalance(gusdBalance, accountAddress),
+    () =>
+      formatPositionValue(formatTokenBalance(gusdBalance, accountAddress)),
     [accountAddress, gusdBalance],
   );
 
@@ -187,8 +205,8 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
       return "Unavailable";
     }
 
-    const symbol = unitBalance.data?.symbol ?? "Units";
-    return `${formatTokenAmount(formatUnits(predepositAmount, unitDecimals))} ${symbol}`.trim();
+    const formatted = `${formatTokenAmount(formatUnits(predepositAmount, unitDecimals), POSITION_PRECISION)} GUSD`.trim();
+    return formatPositionValue(formatted);
   }, [
     accountAddress,
     isPredepositError,
@@ -210,8 +228,8 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
   return (
     <aside
       className={cn(
-        "relative z-50 flex h-[520px] overflow-hidden rounded-l-3xl rounded-r-none border border-border/60 bg-background transition-[width] duration-300 ease-out",
-        open ? "w-72" : "w-12",
+        "relative z-50 flex h-[520px] overflow-hidden rounded-l-3xl rounded-r-none border border-border/60 bg-card/60 transition-[width] duration-300 ease-out",
+        open ? "w-60" : "w-12",
         className,
       )}
     >
@@ -233,7 +251,7 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
           </div>
           <div className="flex flex-1 flex-col gap-4 px-4 py-6">
             {hasUnits ? (
-              <div className="rounded-2xl border border-border/60 bg-muted/70 p-4 shadow-md transition-shadow hover:shadow-lg">
+              <div className="rounded-2xl border border-border/60 bg-card/60 p-4 shadow-md transition-shadow hover:shadow-lg">
                 <div className="flex items-center gap-2 text-muted-foreground">
                   <Layers className="h-4 w-4" />
                   <p className="text-[11px] font-semibold uppercase tracking-[0.22em]">
@@ -263,7 +281,7 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
                 <div className="flex items-center gap-2 text-white/80">
                   <Sparkles className="h-4 w-4" />
                   <p className="text-[11px] font-semibold uppercase tracking-[0.22em]">
-                    Predeposit
+                    Status Predeposit
                   </p>
                 </div>
                 <p className="mt-2 text-lg font-semibold text-white">
@@ -272,7 +290,7 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
               </div>
             ) : null}
             {showEmptyState ? (
-              <div className="flex min-h-[110px] flex-col items-center justify-center rounded-2xl border border-dashed border-border/60 bg-muted/30 p-4 text-center text-sm text-muted-foreground">
+              <div className="flex min-h-[110px] flex-col items-center justify-center rounded-2xl border border-dashed border-border/60 bg-card/60 p-4 text-center text-sm text-muted-foreground">
                 <span className="text-[11px] font-semibold uppercase tracking-[0.22em]">
                   No positions
                 </span>

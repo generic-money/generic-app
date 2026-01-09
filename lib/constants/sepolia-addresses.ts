@@ -8,7 +8,7 @@ type StablecoinAddressConfig = {
 export const SEPOLIA_STABLECOIN_ADDRESSES = {
   USDC: {
     tokenAddress: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
-    depositVaultAddress: "0xee77df35586D3b61f53D424Ca201Cd4b8D3D69d7",
+    depositVaultAddress: "0x2f00689aB9beb0772F69e332702Ffb4aAe92E63c",
   },
   USDT: {
     tokenAddress: "0xa86631d267E40354eaB5361273065DAfDF316EAc",

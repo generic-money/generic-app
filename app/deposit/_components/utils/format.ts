@@ -17,9 +17,14 @@ export const formatTokenAmount = (value: string, precision = 6) => {
   return limitedFraction ? `${whole}.${limitedFraction}` : whole;
 };
 
+type BalanceFormatOptions = {
+  fixedDecimals?: number;
+};
+
 export const formatBalanceText = (
   balance: BalanceLike,
   accountAddress?: string,
+  options: BalanceFormatOptions = {},
 ) => {
   if (!accountAddress) {
     return "Balance: —";
@@ -43,14 +48,21 @@ export const formatBalanceText = (
     return "Balance: $0.00";
   }
 
-  if (numericValue < 0.0001) {
-    return "Balance: <$0.0001";
+  if (options.fixedDecimals == null) {
+    if (numericValue < 0.0001) {
+      return "Balance: <$0.0001";
+    }
+
+    const decimalPlaces = numericValue >= 1 ? 2 : 4;
+
+    return `Balance: $${numericValue.toLocaleString("en-US", {
+      minimumFractionDigits: decimalPlaces,
+      maximumFractionDigits: decimalPlaces,
+    })}`;
   }
 
-  const decimalPlaces = numericValue >= 1 ? 2 : 4;
-
   return `Balance: $${numericValue.toLocaleString("en-US", {
-    minimumFractionDigits: decimalPlaces,
-    maximumFractionDigits: decimalPlaces,
+    minimumFractionDigits: options.fixedDecimals,
+    maximumFractionDigits: options.fixedDecimals,
   })}`;
 };

@@ -207,8 +207,16 @@ export function DepositSwap() {
     setFromAmount("");
   }, [selectedTicker, isDepositFlow, depositRoute, chainName]);
 
-  const fromBalanceText = formatBalanceText(fromBalanceHook, accountAddress);
-  const toBalanceText = formatBalanceText(toBalanceHook, accountAddress);
+  const fromBalanceText = formatBalanceText(
+    fromBalanceHook,
+    accountAddress,
+    fromAssetType === "gusd" ? { fixedDecimals: 2 } : undefined,
+  );
+  const toBalanceText = formatBalanceText(
+    toBalanceHook,
+    accountAddress,
+    toAssetType === "gusd" ? { fixedDecimals: 2 } : undefined,
+  );
   const canUseMax =
     Boolean(accountAddress) && Boolean(fromBalanceHook.data?.formatted);
 
@@ -716,7 +724,7 @@ export function DepositSwap() {
             <fieldset className="flex flex-wrap items-center justify-center gap-2">
               <legend className="sr-only">Deposit route</legend>
               <Chip
-                label="Predeposit"
+                label="Status Predeposit"
                 selected={depositRoute === "predeposit"}
                 name="deposit-route"
                 onSelect={() => setDepositRoute("predeposit")}

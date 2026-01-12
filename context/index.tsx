@@ -2,26 +2,29 @@
 
 import { createAppKit } from "@reown/appkit/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { type ReactNode, useEffect } from "react";
+import * as React from "react";
 import { type Config, cookieToInitialState, WagmiProvider } from "wagmi";
-
 import {
   defaultNetwork,
   networks,
   projectId,
   wagmiAdapter,
 } from "@/config/wagmi";
+import {
+  DEFAULT_OPPORTUNITY_ROUTE,
+  getOpportunityTheme,
+  type OpportunityRoute,
+} from "@/lib/constants/opportunity-theme";
 
 const queryClient = new QueryClient();
 const overrides: Record<string, string> = {
-  "--apkt-tokens-core-backgroundAccentPrimary-base": "#0a0b0d",
-  "--apkt-tokens-core-backgroundAccentPrimary": "#0a0b0d",
-  "--apkt-tokens-core-textAccentPrimary": "#ffffff",
   "--apkt-fontFamily-regular": "var(--font-gilroy), system-ui, sans-serif",
   "--apkt-fontFamily-mono": "var(--font-geist-mono)",
   "--wui-font-family": "var(--font-gilroy), system-ui, sans-serif",
-  "--wui-colors-accent-100": "#0a0b0d",
-  "--wui-colors-fg-100": "#ffffff",
+  "--wui-colors-accent-100": "hsl(var(--primary))",
+  "--apkt-tokens-core-backgroundAccentPrimary-base": "hsl(var(--primary))",
+  "--apkt-tokens-core-backgroundAccentPrimary": "hsl(var(--primary))",
+  "--apkt-tokens-core-textAccentPrimary": "hsl(var(--primary-foreground))",
 };
 
 if (!projectId) {
@@ -61,29 +64,92 @@ const init = () => {
 };
 
 type ContextProviderProps = {
-  children: ReactNode;
+  children: React.ReactNode;
   cookies: string | null;
+};
+
+type OpportunityRouteContextValue = {
+  route: OpportunityRoute;
+  setRoute: (route: OpportunityRoute) => void;
+};
+
+const OPPORTUNITY_STORAGE_KEY = "generic.opportunityRoute";
+
+const OpportunityRouteContext = React.createContext<
+  OpportunityRouteContextValue | undefined
+>(undefined);
+
+export const useOpportunityRoute = () => {
+  const value = React.useContext(OpportunityRouteContext);
+  if (!value) {
+    throw new Error("useOpportunityRoute must be used within ContextProvider");
+  }
+  return value;
+};
+
+const applyOpportunityThemeToRoot = (route: OpportunityRoute) => {
+  const root = document.documentElement;
+  const theme = getOpportunityTheme(route);
+
+  root.style.setProperty("--primary", theme.primary);
+  root.style.setProperty("--primary-foreground", theme.primaryForeground);
+  root.style.setProperty("--accent", theme.accent);
+  root.style.setProperty("--ring", theme.ring);
 };
 
 export default function ContextProvider({
   children,
   cookies,
 }: ContextProviderProps) {
-  useEffect(() => {
+  React.useEffect(() => {
     init();
   }, []);
+
+  const [route, setRoute] = React.useState<OpportunityRoute>(
+    DEFAULT_OPPORTUNITY_ROUTE,
+  );
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const stored = window.localStorage.getItem(OPPORTUNITY_STORAGE_KEY);
+    if (
+      stored === "citrea" ||
+      stored === "predeposit" ||
+      stored === "mainnet"
+    ) {
+      setRoute(stored);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.setItem(OPPORTUNITY_STORAGE_KEY, route);
+    applyOpportunityThemeToRoot(route);
+  }, [route]);
 
   const initialState = cookieToInitialState(
     wagmiAdapter.wagmiConfig as Config,
     cookies,
   );
 
+  const value = React.useMemo(() => ({ route, setRoute }), [route]);
+
   return (
     <WagmiProvider
       config={wagmiAdapter.wagmiConfig as Config}
       initialState={initialState}
     >
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      <OpportunityRouteContext.Provider value={value}>
+        <QueryClientProvider client={queryClient}>
+          {children}
+        </QueryClientProvider>
+      </OpportunityRouteContext.Provider>
     </WagmiProvider>
   );
 }

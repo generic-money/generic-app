@@ -66,6 +66,15 @@
   --popover-foreground: var(--gray-95);
   --primary: var(--blue-100);
   --primary-foreground: 221 100% 96%;
+
+  --w3m-accent: hsl(var(--primary));
+  --w3m-background: hsl(var(--background));
+  --w3m-font-family: var(--font-sans);
+  --w3m-border-radius-master: 16px;
+  --apkt-accent: hsl(var(--primary));
+  --apkt-background: hsl(var(--background));
+  --apkt-font-family: var(--font-sans);
+  --apkt-border-radius-master: 16px;
   --secondary: 220 12% 92%;
   --secondary-foreground: var(--gray-95);
   --muted: 220 12% 92%;
@@ -102,6 +111,15 @@
   --popover-foreground: var(--gray-5);
   --primary: var(--blue-100);
   --primary-foreground: var(--blue-15);
+
+  --w3m-accent: hsl(var(--primary));
+  --w3m-background: hsl(var(--background));
+  --w3m-font-family: var(--font-sans);
+  --w3m-border-radius-master: 16px;
+  --apkt-accent: hsl(var(--primary));
+  --apkt-background: hsl(var(--background));
+  --apkt-font-family: var(--font-sans);
+  --apkt-border-radius-master: 16px;
   --secondary: var(--gray-25);
   --secondary-foreground: var(--gray-5);
   --muted: var(--gray-50);

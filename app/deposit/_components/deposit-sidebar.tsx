@@ -11,10 +11,7 @@ import { useEffect, useMemo, useState } from "react";
 import { formatUnits } from "viem";
 import { useAccount, useBalance, useChainId, useReadContract } from "wagmi";
 
-import {
-  CHAIN_ID_BY_NAME,
-  getChainNameById,
-} from "@/lib/constants/chains";
+import { CHAIN_ID_BY_NAME, getChainNameById } from "@/lib/constants/chains";
 import { getGenericUnitTokenAddress } from "@/lib/constants/contracts";
 import {
   getBridgeCoordinatorAddress,
@@ -183,14 +180,12 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
   }, [predepositAmount, unitDecimals]);
 
   const unitBalanceValue = useMemo(
-    () =>
-      formatPositionValue(formatTokenBalance(unitBalance, accountAddress)),
+    () => formatPositionValue(formatTokenBalance(unitBalance, accountAddress)),
     [accountAddress, unitBalance],
   );
 
   const gusdBalanceValue = useMemo(
-    () =>
-      formatPositionValue(formatTokenBalance(gusdBalance, accountAddress)),
+    () => formatPositionValue(formatTokenBalance(gusdBalance, accountAddress)),
     [accountAddress, gusdBalance],
   );
 
@@ -207,7 +202,8 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
       return "Unavailable";
     }
 
-    const formatted = `${formatTokenAmount(formatUnits(predepositAmount, unitDecimals), POSITION_PRECISION)} GUSD`.trim();
+    const formatted =
+      `${formatTokenAmount(formatUnits(predepositAmount, unitDecimals), POSITION_PRECISION)} GUSD`.trim();
     return formatPositionValue(formatted);
   }, [
     accountAddress,
@@ -252,7 +248,7 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
           </div>
           <div className="flex flex-1 flex-col gap-4 px-4 py-6">
             {hasUnits ? (
-              <div className="rounded-2xl border border-border/60 bg-card/60 p-4 shadow-md transition-shadow hover:shadow-lg">
+              <div className="rounded-2xl border border-border/60 bg-background/70 p-4 shadow-sm transition hover:shadow-md">
                 <div className="flex items-center gap-2 text-muted-foreground">
                   <Layers className="h-4 w-4" />
                   <p className="text-[11px] font-semibold uppercase tracking-[0.22em]">
@@ -265,33 +261,33 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
               </div>
             ) : null}
             {hasGusd ? (
-              <div className="rounded-2xl bg-primary p-4 text-primary-foreground shadow-md ring-1 ring-white/10 transition-shadow hover:shadow-lg">
-                <div className="flex items-center gap-2 text-primary-foreground/80">
+              <div className="rounded-2xl border border-primary/30 bg-primary/10 p-4 shadow-sm transition hover:shadow-md">
+                <div className="flex items-center gap-2 text-primary/80">
                   <Droplet className="h-4 w-4" />
                   <p className="text-[11px] font-semibold uppercase tracking-[0.22em]">
                     GUSD
                   </p>
                 </div>
-                <p className="mt-2 text-lg font-semibold text-primary-foreground">
+                <p className="mt-2 text-lg font-semibold text-foreground">
                   {gusdBalanceValue}
                 </p>
               </div>
             ) : null}
             {hasPredeposit ? (
-              <div className="rounded-2xl bg-[#7140FD] p-4 text-white shadow-md ring-1 ring-white/10 transition-shadow hover:shadow-lg">
-                <div className="flex items-center gap-2 text-white/80">
+              <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 shadow-sm transition hover:shadow-md">
+                <div className="flex items-center gap-2 text-primary/80">
                   <Sparkles className="h-4 w-4" />
                   <p className="text-[11px] font-semibold uppercase tracking-[0.22em]">
                     Status Predeposit
                   </p>
                 </div>
-                <p className="mt-2 text-lg font-semibold text-white">
+                <p className="mt-2 text-lg font-semibold text-foreground">
                   {predepositValue}
                 </p>
               </div>
             ) : null}
             {showEmptyState ? (
-              <div className="flex min-h-[110px] flex-col items-center justify-center rounded-2xl border border-dashed border-border/60 bg-card/60 p-4 text-center text-sm text-muted-foreground">
+              <div className="flex min-h-[110px] flex-col items-center justify-center rounded-2xl border border-dashed border-border/60 bg-background/70 p-4 text-center text-sm text-muted-foreground">
                 <span className="text-[11px] font-semibold uppercase tracking-[0.22em]">
                   No positions
                 </span>

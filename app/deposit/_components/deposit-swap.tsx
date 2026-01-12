@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowUpDown } from "lucide-react";
-import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useMemo, useState } from "react";
 import { erc20Abi, erc4626Abi } from "viem";
 import {
   useAccount,
@@ -21,12 +21,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useOpportunityRoute } from "@/context";
 import { pushAlert } from "@/lib/alerts";
 import { getChainNameById } from "@/lib/constants/chains";
 import {
   getGenericDepositorAddress,
   getGenericUnitTokenAddress,
 } from "@/lib/constants/contracts";
+import {
+  OPPORTUNITY_THEME,
+  type OpportunityRoute,
+} from "@/lib/constants/opportunity-theme";
 import { getPredepositChainNickname } from "@/lib/constants/predeposit";
 import type { StablecoinTicker } from "@/lib/constants/stablecoins";
 import { getStablecoins, gusd } from "@/lib/models/tokens";
@@ -44,7 +49,6 @@ const whitelabeledUnitAbi =
   whitelabeledUnitArtifact.abi as typeof whitelabeledUnitArtifact.abi;
 
 type AssetType = "stablecoin" | "gusd";
-type DepositRoute = "predeposit" | "mainnet" | "citrea";
 const ZERO_AMOUNT = BigInt(0);
 type HexBytes = `0x${string}`;
 
@@ -79,12 +83,12 @@ const TokenIcon = ({ src, alt }: { src: string; alt: string }) => (
     height={20}
     loading="lazy"
     decoding="async"
-    className="h-5 w-5 rounded-full"
+    className="h-5 w-5 shrink-0 rounded-full"
   />
 );
 
 type OpportunityOption = {
-  value: DepositRoute;
+  value: OpportunityRoute;
   eyebrow: string;
   title: string;
   description: string;
@@ -126,35 +130,6 @@ const OPPORTUNITY_OPTIONS: OpportunityOption[] = [
   },
 ];
 
-
-type OpportunityTheme = {
-  primary: string;
-  primaryForeground: string;
-  accent: string;
-  ring: string;
-};
-
-const OPPORTUNITY_THEME: Record<DepositRoute, OpportunityTheme> = {
-  citrea: {
-    primary: "24 94% 56%",
-    primaryForeground: "0 0% 100%",
-    accent: "24 100% 95%",
-    ring: "24 94% 56%",
-  },
-  predeposit: {
-    primary: "262 94% 62%",
-    primaryForeground: "0 0% 100%",
-    accent: "262 100% 96%",
-    ring: "262 94% 62%",
-  },
-  mainnet: {
-    primary: "221 100% 58%",
-    primaryForeground: "221 100% 96%",
-    accent: "221 100% 94%",
-    ring: "221 100% 58%",
-  },
-};
-
 const OpportunityCard = ({
   option,
   selected,
@@ -166,7 +141,7 @@ const OpportunityCard = ({
   onSelect: () => void;
   name: string;
 }) => {
-  const optionTone = OPPORTUNITY_THEME[option.value] ?? OPPORTUNITY_THEME.mainnet;
+  const optionTone = OPPORTUNITY_THEME[option.value];
   const style = {
     "--opportunity-color": optionTone.primary,
   } as CSSProperties;
@@ -193,7 +168,7 @@ const OpportunityCard = ({
           {option.eyebrow}
         </span>
         {option.badge ? (
-          <span className="rounded-full border border-[hsl(var(--opportunity-color)/0.25)] bg-[hsl(var(--opportunity-color)/0.12)] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.2em] text-[hsl(var(--opportunity-color)/0.75)] transition group-hover:border-[hsl(var(--opportunity-color)/0.45)] group-hover:bg-[hsl(var(--opportunity-color)/0.2)] group-hover:text-[hsl(var(--opportunity-color))]">
+          <span className="rounded-full border border-border/60 bg-background/70 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.2em] text-muted-foreground transition group-hover:border-[hsl(var(--opportunity-color)/0.45)] group-hover:bg-[hsl(var(--opportunity-color)/0.2)] group-hover:text-[hsl(var(--opportunity-color))]">
             {option.badge}
           </span>
         ) : null}
@@ -230,8 +205,9 @@ export function DepositSwap() {
   });
   const [selectedTicker, setSelectedTicker] =
     useState<StablecoinTicker>("USDC");
+  const { route: depositRoute, setRoute: setDepositRoute } =
+    useOpportunityRoute();
   const [isDepositFlow, setIsDepositFlow] = useState(true);
-  const [depositRoute, setDepositRoute] = useState<DepositRoute>("citrea");
   const [fromAmount, setFromAmount] = useState("");
   const [txStep, setTxStep] = useState<"idle" | "approving" | "submitting">(
     "idle",
@@ -257,50 +233,6 @@ export function DepositSwap() {
       OPPORTUNITY_OPTIONS[0],
     [depositRoute],
   );
-
-  const themeTokens = useMemo(
-    () => OPPORTUNITY_THEME[depositRoute] ?? OPPORTUNITY_THEME.mainnet,
-    [depositRoute],
-  );
-
-  const defaultTheme = useRef<OpportunityTheme | null>(null);
-
-  useEffect(() => {
-    const root = document.documentElement;
-    if (!defaultTheme.current) {
-      const computed = getComputedStyle(root);
-      defaultTheme.current = {
-        primary: computed.getPropertyValue("--primary").trim(),
-        primaryForeground: computed.getPropertyValue("--primary-foreground").trim(),
-        accent: computed.getPropertyValue("--accent").trim(),
-        ring: computed.getPropertyValue("--ring").trim(),
-      };
-    }
-  }, []);
-
-  useEffect(() => {
-    const root = document.documentElement;
-    root.style.setProperty("--primary", themeTokens.primary);
-    root.style.setProperty("--primary-foreground", themeTokens.primaryForeground);
-    root.style.setProperty("--accent", themeTokens.accent);
-    root.style.setProperty("--ring", themeTokens.ring);
-  }, [themeTokens]);
-
-  useEffect(() => {
-    return () => {
-      if (!defaultTheme.current) {
-        return;
-      }
-      const root = document.documentElement;
-      root.style.setProperty("--primary", defaultTheme.current.primary);
-      root.style.setProperty(
-        "--primary-foreground",
-        defaultTheme.current.primaryForeground,
-      );
-      root.style.setProperty("--accent", defaultTheme.current.accent);
-      root.style.setProperty("--ring", defaultTheme.current.ring);
-    };
-  }, []);
 
   const formDescription = isDepositFlow
     ? selectedOpportunity.formDescription

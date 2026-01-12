@@ -5,7 +5,7 @@ export function Footer() {
         <span className="font-medium text-foreground">Generic Money</span>
         <nav className="flex items-center gap-6">
           <a
-            href="https://github.com"
+            href="https://github.com/MetaFi-Labs/generic-protocol"
             target="_blank"
             rel="noopener noreferrer"
             className="transition-colors hover:text-foreground"
@@ -13,15 +13,15 @@ export function Footer() {
             Github
           </a>
           <a
-            href="https://x.com"
+            href="https://x.com/genericmoney"
             target="_blank"
             rel="noopener noreferrer"
             className="transition-colors hover:text-foreground"
           >
-            X.com
+            X
           </a>
           <a
-            href="mailto:hello@example.com"
+            href="mailto:partners@generic.money"
             className="transition-colors hover:text-foreground"
           >
             Reach out

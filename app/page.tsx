@@ -1,4 +1,3 @@
-import Link from "next/link";
 import {
   ArrowDown,
   ArrowUpRight,
@@ -8,6 +7,7 @@ import {
   LineChart,
   ShieldCheck,
 } from "lucide-react";
+import Link from "next/link";
 
 import { DepositSidebar } from "./deposit/_components/deposit-sidebar";
 import { DepositSwap } from "./deposit/_components/deposit-swap";
@@ -76,7 +76,8 @@ export default function HomePage() {
                   </span>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Track TVL cap, queue depth, and launch readiness for Status L2.
+                  Track TVL cap, queue depth, and launch readiness for Status
+                  L2.
                 </p>
                 <div className="mt-auto flex flex-wrap gap-2 text-xs font-semibold text-foreground/80">
                   <span className="rounded-full border border-border/60 bg-background/70 px-3 py-1">
@@ -119,7 +120,8 @@ export default function HomePage() {
                   </span>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Monitor liquidity depth, fee tier, and settlement pace on Citrea.
+                  Monitor liquidity depth, fee tier, and settlement pace on
+                  Citrea.
                 </p>
                 <div className="mt-auto flex flex-wrap gap-2 text-xs font-semibold text-foreground/80">
                   <span className="rounded-full border border-border/60 bg-background/70 px-3 py-1">
@@ -162,7 +164,8 @@ export default function HomePage() {
                   </span>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Follow collateral readiness, proofs, and mint windows on mainnet.
+                  Follow collateral readiness, proofs, and mint windows on
+                  mainnet.
                 </p>
                 <div className="mt-auto flex flex-wrap gap-2 text-xs font-semibold text-foreground/80">
                   <span className="rounded-full border border-border/60 bg-background/70 px-3 py-1">

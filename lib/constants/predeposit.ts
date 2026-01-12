@@ -1,6 +1,6 @@
+import type { HexAddress } from "../types/address";
 import type { ChainName } from "./chains";
 import { CHAINS, DEFAULT_CHAIN } from "./chains";
-import type { HexAddress } from "../types/address";
 
 type HexBytes = `0x${string}`;
 
@@ -13,10 +13,8 @@ export const BRIDGE_COORDINATOR_ADDRESSES: Record<ChainName, HexAddress> = {
   [CHAINS.MAINNET]: "0x0503F2C5A1a4b72450c6Cfa790F2097CF5cB6a01",
 };
 
-export const getBridgeCoordinatorAddress = (
-  chain: ChainName = DEFAULT_CHAIN,
-) => BRIDGE_COORDINATOR_ADDRESSES[chain];
+export const getBridgeCoordinatorAddress = (chain: ChainName = DEFAULT_CHAIN) =>
+  BRIDGE_COORDINATOR_ADDRESSES[chain];
 
-export const getPredepositChainNickname = (
-  chain: ChainName = DEFAULT_CHAIN,
-) => PREDEPOSIT_CHAIN_NICKNAMES[chain];
+export const getPredepositChainNickname = (chain: ChainName = DEFAULT_CHAIN) =>
+  PREDEPOSIT_CHAIN_NICKNAMES[chain];

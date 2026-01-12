@@ -773,7 +773,7 @@ export function DepositSwap() {
   return (
     <div id="deposit" className="w-full px-6 md:px-8">
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-10">
-        <div className="-mt-20 space-y-4 text-center">
+        <div className="hidden -mt-20 space-y-4 text-center md:block">
           <span className="text-xs font-semibold uppercase tracking-[0.4em] text-muted-foreground">
             Generic Money
           </span>
@@ -784,7 +784,7 @@ export function DepositSwap() {
             Choose the opportunity that matches your DeFi strategy
           </p>
         </div>
-        <fieldset className="mt-20 space-y-4">
+        <fieldset className="mt-2 space-y-4 md:mt-20">
           <legend className="sr-only">Opportunity selection</legend>
           <div className="grid justify-items-center gap-3 lg:grid-cols-3">
             {OPPORTUNITY_OPTIONS.map((option) => (
@@ -793,12 +793,22 @@ export function DepositSwap() {
                 option={option}
                 selected={depositRoute === option.value}
                 name="deposit-route"
-                onSelect={() => setDepositRoute(option.value)}
+                onSelect={() => {
+                  setDepositRoute(option.value);
+                  if (
+                    typeof window !== "undefined" &&
+                    window.matchMedia("(max-width: 767px)").matches
+                  ) {
+                    document
+                      .getElementById("deposit-form")
+                      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }
+                }}
               />
             ))}
           </div>
         </fieldset>
-        <div className="flex w-full justify-center">
+        <div className="flex w-full justify-center" id="deposit-form">
           <div className="flex w-full max-w-md flex-col gap-6 rounded-3xl border border-border/60 bg-card/80 p-8 shadow-[0_35px_60px_-40px_rgba(15,23,42,0.45)] backdrop-blur">
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-[0.3em] text-muted-foreground">

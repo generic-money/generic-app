@@ -68,7 +68,7 @@ export default function HomePage() {
                       Status GUSD
                     </span>
                     <h3 className="text-lg font-semibold">
-                      Status L2 predeposit status
+                      Status L2 predeposit vault
                     </h3>
                   </div>
                   <span className="flex h-10 w-10 items-center justify-center rounded-full border border-border/60 bg-background/80 text-primary shadow-sm">
@@ -76,28 +76,48 @@ export default function HomePage() {
                   </span>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Track TVL cap, queue depth, and launch readiness for Status
-                  L2.
+                  Early access to a privacy-forward Status L2 vault. Lock now,
+                  unlock at launch — no penalties
                 </p>
-                <div className="mt-auto flex flex-wrap gap-2 text-xs font-semibold text-foreground/80">
-                  <span className="rounded-full border border-border/60 bg-background/70 px-3 py-1">
-                    TVL cap
-                  </span>
-                  <span className="rounded-full border border-border/60 bg-background/70 px-3 py-1">
-                    Queue depth
-                  </span>
-                  <span className="rounded-full border border-border/60 bg-background/70 px-3 py-1">
-                    Launch readiness
-                  </span>
+                <div className="mt-auto space-y-3">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+                        APY
+                      </p>
+                      <p className="mt-1 text-lg font-semibold text-foreground">
+                        —%
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+                        TVL
+                      </p>
+                      <p className="mt-1 text-lg font-semibold text-foreground">
+                        $—
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-4">
+                    <a
+                      href="https://x.com/genericmoney"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 text-sm font-semibold text-foreground/70 transition hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                    >
+                      Announcement
+                      <ArrowUpRight className="h-4 w-4" />
+                    </a>
+                    <Link
+                      href="/documentation"
+                      className="inline-flex items-center gap-2 text-sm font-semibold text-foreground/70 transition hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                      aria-label="Open strategies"
+                    >
+                      Strategies
+                      <ArrowUpRight className="h-4 w-4" />
+                    </Link>
+                  </div>
                 </div>
-                <Link
-                  href="/documentation"
-                  className="inline-flex items-center gap-2 text-sm font-semibold text-foreground/70 transition group-hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                  aria-label="Read the Status L2 predeposit guide"
-                >
-                  View Status L2 status
-                  <ArrowUpRight className="h-4 w-4" />
-                </Link>
               </div>
             </div>
             <div
@@ -112,7 +132,7 @@ export default function HomePage() {
                       Citrea GUSD
                     </span>
                     <h3 className="text-lg font-semibold">
-                      Citrea GUSD liquidity
+                      Citrea GUSD for Bitcoin DeFi
                     </h3>
                   </div>
                   <span className="flex h-10 w-10 items-center justify-center rounded-full border border-border/60 bg-background/80 text-primary shadow-sm">
@@ -120,28 +140,48 @@ export default function HomePage() {
                   </span>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Monitor liquidity depth, fee tier, and settlement pace on
-                  Citrea.
+                  Bitcoin-first chain for OGs. Bring DeFi liquidity to Bitcoin
+                  with Citrea-native GUSD
                 </p>
-                <div className="mt-auto flex flex-wrap gap-2 text-xs font-semibold text-foreground/80">
-                  <span className="rounded-full border border-border/60 bg-background/70 px-3 py-1">
-                    Liquidity depth
-                  </span>
-                  <span className="rounded-full border border-border/60 bg-background/70 px-3 py-1">
-                    Fee tier
-                  </span>
-                  <span className="rounded-full border border-border/60 bg-background/70 px-3 py-1">
-                    Settlement pace
-                  </span>
+                <div className="mt-auto space-y-3">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+                        APY
+                      </p>
+                      <p className="mt-1 text-lg font-semibold text-foreground">
+                        —%
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+                        TVL
+                      </p>
+                      <p className="mt-1 text-lg font-semibold text-foreground">
+                        $—
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-4">
+                    <a
+                      href="https://x.com/genericmoney"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 text-sm font-semibold text-foreground/70 transition hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                    >
+                      Announcement
+                      <ArrowUpRight className="h-4 w-4" />
+                    </a>
+                    <Link
+                      href="/documentation"
+                      className="inline-flex items-center gap-2 text-sm font-semibold text-foreground/70 transition hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                      aria-label="Open strategies"
+                    >
+                      Strategies
+                      <ArrowUpRight className="h-4 w-4" />
+                    </Link>
+                  </div>
                 </div>
-                <Link
-                  href="/documentation"
-                  className="inline-flex items-center gap-2 text-sm font-semibold text-foreground/70 transition group-hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                  aria-label="Read the Citrea GUSD guide"
-                >
-                  View Citrea metrics
-                  <ArrowUpRight className="h-4 w-4" />
-                </Link>
               </div>
             </div>
             <div
@@ -156,7 +196,7 @@ export default function HomePage() {
                       Mainnet GUSD
                     </span>
                     <h3 className="text-lg font-semibold">
-                      Mainnet GUSD minting
+                      Mainnet GUSD for payments
                     </h3>
                   </div>
                   <span className="flex h-10 w-10 items-center justify-center rounded-full border border-border/60 bg-background/80 text-primary shadow-sm">
@@ -164,28 +204,48 @@ export default function HomePage() {
                   </span>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Follow collateral readiness, proofs, and mint windows on
-                  mainnet.
+                  Simple payments stablecoin with ~5% APY. No hustle, no extra
+                  steps
                 </p>
-                <div className="mt-auto flex flex-wrap gap-2 text-xs font-semibold text-foreground/80">
-                  <span className="rounded-full border border-border/60 bg-background/70 px-3 py-1">
-                    Collateral ready
-                  </span>
-                  <span className="rounded-full border border-border/60 bg-background/70 px-3 py-1">
-                    Proofs live
-                  </span>
-                  <span className="rounded-full border border-border/60 bg-background/70 px-3 py-1">
-                    Mint window
-                  </span>
+                <div className="mt-auto space-y-3">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+                        APY
+                      </p>
+                      <p className="mt-1 text-lg font-semibold text-foreground">
+                        —%
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+                        TVL
+                      </p>
+                      <p className="mt-1 text-lg font-semibold text-foreground">
+                        $—
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-4">
+                    <a
+                      href="https://x.com/genericmoney"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 text-sm font-semibold text-foreground/70 transition hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                    >
+                      Announcement
+                      <ArrowUpRight className="h-4 w-4" />
+                    </a>
+                    <Link
+                      href="/documentation"
+                      className="inline-flex items-center gap-2 text-sm font-semibold text-foreground/70 transition hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                      aria-label="Open strategies"
+                    >
+                      Strategies
+                      <ArrowUpRight className="h-4 w-4" />
+                    </Link>
+                  </div>
                 </div>
-                <Link
-                  href="/documentation"
-                  className="inline-flex items-center gap-2 text-sm font-semibold text-foreground/70 transition group-hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                  aria-label="Read the mainnet GUSD guide"
-                >
-                  View mainnet status
-                  <ArrowUpRight className="h-4 w-4" />
-                </Link>
               </div>
             </div>
           </div>

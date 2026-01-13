@@ -214,7 +214,7 @@ export default function HomePage() {
                         APY
                       </p>
                       <p className="mt-1 text-lg font-semibold text-foreground">
-                        —%
+                        ≈5%
                       </p>
                     </div>
                     <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5">

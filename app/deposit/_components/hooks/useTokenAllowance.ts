@@ -1,6 +1,5 @@
 import { erc20Abi } from "viem";
-import { mainnet } from "viem/chains";
-import { useReadContract } from "wagmi";
+import { useChainId, useReadContract } from "wagmi";
 
 import { type HexAddress, ZERO_ADDRESS } from "@/lib/types/address";
 
@@ -12,11 +11,12 @@ type Params = {
 
 export function useTokenAllowance({ token, owner, spender }: Params) {
   const enabled = Boolean(token && owner && spender);
+  const chainId = useChainId();
 
   const { data, refetch, ...rest } = useReadContract({
     address: token ?? ZERO_ADDRESS,
     abi: erc20Abi,
-    chainId: mainnet.id,
+    chainId,
     functionName: "allowance",
     args:
       owner && spender

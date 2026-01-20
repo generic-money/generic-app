@@ -23,7 +23,10 @@ type MultichainTokenDefinition<TTicker extends string> = {
   chains: Partial<Record<ChainName, Address>>;
 };
 
-export const STABLECOIN_DEFINITIONS = {
+export const STABLECOIN_DEFINITIONS: Record<
+  StablecoinTicker,
+  StablecoinDefinition
+> = {
   USDC: {
     ticker: "USDC",
     conversionValue: 1,
@@ -57,7 +60,7 @@ export const STABLECOIN_DEFINITIONS = {
       },
     },
   },
-} as const satisfies Record<StablecoinTicker, StablecoinDefinition>;
+};
 
 export const GUSD_DEFINITION = {
   ticker: "GUSD",

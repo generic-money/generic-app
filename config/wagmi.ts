@@ -1,4 +1,4 @@
-import { mainnet } from "@reown/appkit/networks";
+import { type AppKitNetwork, mainnet } from "@reown/appkit/networks";
 import { WagmiAdapter } from "@reown/appkit-adapter-wagmi";
 import { cookieStorage, createStorage } from "@wagmi/core";
 
@@ -11,7 +11,8 @@ if (!rawProjectId) {
 
 export const projectId = rawProjectId;
 
-export const networks = [mainnet];
+export const networks: [AppKitNetwork, ...AppKitNetwork[]] = [mainnet];
+export const defaultNetwork = mainnet;
 
 // Set up the Wagmi Adapter (Config)
 export const wagmiAdapter = new WagmiAdapter({

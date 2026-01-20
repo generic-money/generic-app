@@ -1,7 +1,7 @@
 export default function DocumentationPage() {
   return (
     <main className="mx-auto flex max-w-4xl flex-col gap-6 px-6 pb-24 pt-16 md:px-8 md:pt-20">
-      <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">
+      <h1 className="text-3xl font-bold tracking-tight md:text-4xl">
         Documentation Workspace
       </h1>
       <p className="text-base text-muted-foreground">

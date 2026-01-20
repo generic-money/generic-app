@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import { erc4626Abi, formatUnits, parseUnits } from "viem";
-import { mainnet } from "viem/chains";
-import { useReadContract } from "wagmi";
+import { useChainId, useReadContract } from "wagmi";
 
 import { type HexAddress, ZERO_ADDRESS } from "@/lib/types/address";
 import { formatTokenAmount } from "../utils/format";
@@ -55,11 +54,12 @@ export function useErc4626Preview({
   );
 
   const functionName = mode === "deposit" ? "previewDeposit" : "previewRedeem";
+  const chainId = useChainId();
 
   const { data, ...rest } = useReadContract({
     address: vaultAddress ?? ZERO_ADDRESS,
     abi: erc4626Abi,
-    chainId: mainnet.id,
+    chainId,
     functionName,
     args,
     query: {

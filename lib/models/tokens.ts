@@ -35,14 +35,17 @@ export class MultichainToken<TTicker extends string> {
   }
 }
 
-const createStablecoin = (ticker: StablecoinTicker): Stablecoin => {
+const stablecoinOrder: StablecoinTicker[] = ["USDC", "USDT", "USDS"];
+
+const createStablecoinForChain = (
+  ticker: StablecoinTicker,
+  chain: ChainName,
+) => {
   const definition = STABLECOIN_DEFINITIONS[ticker];
-  const chainConfig = definition.chains[DEFAULT_CHAIN];
+  const chainConfig = definition.chains[chain];
 
   if (!chainConfig) {
-    throw new Error(
-      `Stablecoin ${ticker} is not configured for chain "${DEFAULT_CHAIN}".`,
-    );
+    return null;
   }
 
   return new Stablecoin(
@@ -50,16 +53,18 @@ const createStablecoin = (ticker: StablecoinTicker): Stablecoin => {
     chainConfig.tokenAddress,
     chainConfig.depositVaultAddress,
     definition.conversionValue,
-    DEFAULT_CHAIN,
+    chain,
     definition.iconUrl,
   );
 };
 
-export const stablecoins = [
-  createStablecoin("USDC"),
-  createStablecoin("USDT"),
-  createStablecoin("USDS"),
-] as const;
+export const getStablecoins = (chain: ChainName = DEFAULT_CHAIN) =>
+  stablecoinOrder.flatMap((ticker) => {
+    const stablecoin = createStablecoinForChain(ticker, chain);
+    return stablecoin ? [stablecoin] : [];
+  });
+
+export const stablecoins = getStablecoins();
 
 export const gusd = new MultichainToken(
   GUSD_DEFINITION.ticker,

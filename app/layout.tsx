@@ -1,26 +1,47 @@
+import { Analytics } from "@vercel/analytics/next";
 import type { Metadata } from "next";
 import localFont from "next/font/local";
-
 import { headers } from "next/headers";
 
 import { Footer } from "@/components/navigation/footer";
 import { Navbar } from "@/components/navigation/navbar";
 import { Toaster } from "@/components/ui/sonner";
 import ContextProvider from "@/context";
+
 import "./globals.css";
 
 const gilroy = localFont({
   variable: "--font-gilroy",
   src: [
     {
+      path: "../public/fonts/Gilroy-Regular.ttf",
+      weight: "400",
+      style: "normal",
+    },
+    {
+      path: "../public/fonts/Gilroy-RegularItalic.ttf",
+      weight: "400",
+      style: "italic",
+    },
+    {
       path: "../public/fonts/Gilroy-Medium.ttf",
-      weight: "400 500",
+      weight: "500",
       style: "normal",
     },
     {
       path: "../public/fonts/Gilroy-SemiBold.ttf",
       weight: "600",
       style: "normal",
+    },
+    {
+      path: "../public/fonts/Gilroy-Bold.ttf",
+      weight: "700",
+      style: "normal",
+    },
+    {
+      path: "../public/fonts/Gilroy-BoldItalic.woff",
+      weight: "700",
+      style: "italic",
     },
     {
       path: "../public/fonts/Gilroy-Black.ttf",
@@ -62,6 +83,8 @@ export default async function RootLayout({
             <Footer />
           </div>
           <Toaster position="top-right" closeButton />
+          {/* Keep analytics enabled for production telemetry. */}
+          <Analytics />
         </ContextProvider>
       </body>
     </html>

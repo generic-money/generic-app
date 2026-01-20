@@ -26,7 +26,6 @@ import {
   getGenericDepositorAddress,
   getGenericUnitTokenAddress,
 } from "@/lib/constants/contracts";
-import { PREDEPOSIT_CHAIN_NICKNAME } from "@/lib/constants/predeposit";
 import type { StablecoinTicker } from "@/lib/constants/stablecoins";
 import { gusd, stablecoins } from "@/lib/models/tokens";
 import type { HexAddress } from "@/lib/types/address";
@@ -43,9 +42,18 @@ const whitelabeledUnitAbi =
   whitelabeledUnitArtifact.abi as typeof whitelabeledUnitArtifact.abi;
 
 type AssetType = "stablecoin" | "gusd";
-type DepositRoute = "predeposit" | "mainnet";
+type DepositRoute = "citrea" | "mainnet";
 const ZERO_AMOUNT = BigInt(0);
 type HexBytes = `0x${string}`;
+type HexData = `0x${string}`;
+
+const CITREA_BRIDGE_TYPE = 1n;
+const CITREA_CHAIN_ID = 4114n;
+const CITREA_WHITELABEL =
+  "0x000000000000000000000000ac8c1aeb584765db16ac3e08d4736cfce198589" as const satisfies HexBytes;
+const CITREA_BRIDGE_PARAMS = "0x" as const satisfies HexData;
+// TODO: replace with LayerZero fee quote when helper is available.
+const ESTIMATED_LZ_MESSAGE_FEE_WEI = 3000000000000000n;
 
 const toBytes32 = (value: HexBytes) =>
   `0x${value.slice(2).padStart(64, "0")}` as const;
@@ -159,7 +167,7 @@ export function DepositSwap() {
   const { decimals: stablecoinDecimals } = useErc20Decimals(stablecoinAddress);
   const { decimals: gusdDecimals } = useErc20Decimals(gusdAddress);
 
-  const isPredepositDeposit = isDepositFlow && depositRoute === "predeposit";
+  const isCitreaDeposit = isDepositFlow && depositRoute === "citrea";
 
   const depositorAddress = getGenericDepositorAddress();
   const genericUnitTokenAddress = getGenericUnitTokenAddress();
@@ -219,11 +227,11 @@ export function DepositSwap() {
     amount: fromAmount,
     fromDecimals,
     toDecimals,
-    vaultAddress: isPredepositDeposit ? undefined : vaultAddress,
+    vaultAddress: isCitreaDeposit ? undefined : vaultAddress,
     mode: isDepositFlow ? "deposit" : "redeem",
   });
 
-  const estimatedToAmount = isPredepositDeposit ? fromAmount : previewToAmount;
+  const estimatedToAmount = isCitreaDeposit ? fromAmount : previewToAmount;
 
   const depositTokenAddress = stablecoinAddress;
 
@@ -267,8 +275,8 @@ export function DepositSwap() {
 
   const buttonState = useMemo(() => {
     const actionLabel = isDepositFlow
-      ? isPredepositDeposit
-        ? "Predeposit"
+      ? isCitreaDeposit
+        ? "Deposit & Bridge"
         : "Deposit"
       : "Redeem";
 
@@ -281,7 +289,7 @@ export function DepositSwap() {
         return { label: "Depositor unavailable", disabled: true };
       }
 
-      if (isPredepositDeposit) {
+      if (isCitreaDeposit) {
         if (!stablecoinAddress) {
           return { label: "Select asset", disabled: true };
         }
@@ -330,7 +338,7 @@ export function DepositSwap() {
     depositorAddress,
     gusdAddress,
     genericUnitTokenAddress,
-    isPredepositDeposit,
+    isCitreaDeposit,
     isDepositFlow,
     needsApproval,
     parsedAmount,
@@ -365,7 +373,7 @@ export function DepositSwap() {
           address: approvalToken,
           chainId: mainnet.id,
           args: [depositorAddress, parsedAmount],
-          route: isPredepositDeposit ? "predeposit" : "mainnet",
+          route: isCitreaDeposit ? "citrea" : "mainnet",
         });
         const approvalHash = await writeContractAsync({
           abi: erc20Abi,
@@ -382,35 +390,44 @@ export function DepositSwap() {
 
       setTxStep("submitting");
       let depositHash: HexBytes;
-      if (isPredepositDeposit) {
+      const depositLabel = isCitreaDeposit ? "Deposit & Bridge" : "Deposit";
+      if (isCitreaDeposit) {
         if (!stablecoinAddress) {
           return;
         }
         const remoteRecipient = toBytes32(accountAddress);
 
-        console.info("Predeposit call", {
-          functionName: "depositAndPredeposit",
+        console.info("Deposit & bridge call", {
+          functionName: "depositAndBridge",
           address: depositorAddress,
           chainId: mainnet.id,
           assets: parsedAmount,
           args: [
             stablecoinAddress,
             parsedAmount,
-            PREDEPOSIT_CHAIN_NICKNAME,
+            CITREA_BRIDGE_TYPE,
+            CITREA_CHAIN_ID,
             remoteRecipient,
+            CITREA_WHITELABEL,
+            CITREA_BRIDGE_PARAMS,
           ],
+          value: ESTIMATED_LZ_MESSAGE_FEE_WEI,
         });
         depositHash = await writeContractAsync({
           abi: depositorAbi,
           address: depositorAddress,
           chainId: mainnet.id,
-          functionName: "depositAndPredeposit",
+          functionName: "depositAndBridge",
           args: [
             stablecoinAddress,
             parsedAmount,
-            PREDEPOSIT_CHAIN_NICKNAME,
+            CITREA_BRIDGE_TYPE,
+            CITREA_CHAIN_ID,
             remoteRecipient,
+            CITREA_WHITELABEL,
+            CITREA_BRIDGE_PARAMS,
           ],
+          value: ESTIMATED_LZ_MESSAGE_FEE_WEI,
         });
       } else {
         if (!stablecoinAddress || !gusdAddress) {
@@ -430,15 +447,9 @@ export function DepositSwap() {
           args: [stablecoinAddress, gusdAddress, parsedAmount],
         });
       }
-      notifyTxSubmitted(
-        isPredepositDeposit ? "Predeposit" : "Deposit",
-        depositHash,
-      );
+      notifyTxSubmitted(depositLabel, depositHash);
       await publicClient.waitForTransactionReceipt({ hash: depositHash });
-      notifyTxConfirmed(
-        isPredepositDeposit ? "Predeposit" : "Deposit",
-        depositHash,
-      );
+      notifyTxConfirmed(depositLabel, depositHash);
 
       setFromAmount("");
       const balanceRefetches: Promise<unknown>[] = [];
@@ -707,10 +718,10 @@ export function DepositSwap() {
             <fieldset className="flex flex-wrap items-center justify-center gap-2">
               <legend className="sr-only">Deposit route</legend>
               <Chip
-                label="Predeposit"
-                selected={depositRoute === "predeposit"}
+                label="Citrea"
+                selected={depositRoute === "citrea"}
                 name="deposit-route"
-                onSelect={() => setDepositRoute("predeposit")}
+                onSelect={() => setDepositRoute("citrea")}
               />
               <Chip
                 label="Mainnet"

@@ -3,7 +3,7 @@
 import { ArrowUpDown } from "lucide-react";
 import Image from "next/image";
 import { type CSSProperties, useEffect, useMemo, useState } from "react";
-import { erc20Abi, erc4626Abi } from "viem";
+import { encodePacked, erc20Abi, erc4626Abi } from "viem";
 import {
   useAccount,
   useBalance,
@@ -59,10 +59,21 @@ type HexData = `0x${string}`;
 const CITREA_BRIDGE_TYPE = 1n;
 const CITREA_CHAIN_ID = 4114n;
 const CITREA_WHITELABEL =
-  "0x000000000000000000000000ac8c1aeb584765db16ac3e08d4736cfce198589" as const satisfies HexBytes;
-const CITREA_BRIDGE_PARAMS = "0x" as const satisfies HexData;
+  "0x000000000000000000000000ac8c1aeb584765db16ac3e08d4736cfce198589b" as const satisfies HexBytes;
+const CITREA_LZ_RECEIVE_GAS = 200_000n;
+
+const buildLzReceiveOptions = (gas: bigint): HexData => {
+  const lzReceiveOption = encodePacked(["uint128"], [gas]);
+  const optionSize = (lzReceiveOption.length - 2) / 2 + 1;
+  return encodePacked(
+    ["uint16", "uint8", "uint16", "uint8", "bytes"],
+    [3, 1, optionSize, 1, lzReceiveOption],
+  ) as HexData;
+};
+
+const CITREA_BRIDGE_PARAMS = buildLzReceiveOptions(CITREA_LZ_RECEIVE_GAS);
 // TODO: replace with LayerZero fee quote when helper is available.
-const ESTIMATED_LZ_MESSAGE_FEE_WEI = 3000000000000000n;
+const ESTIMATED_LZ_MESSAGE_FEE_WEI = 10000000000000000n;
 
 const toBytes32 = (value: HexBytes) =>
   `0x${value.slice(2).padStart(64, "0")}` as const;
@@ -570,6 +581,11 @@ export function DepositSwap() {
             CITREA_BRIDGE_PARAMS,
           ],
           value: ESTIMATED_LZ_MESSAGE_FEE_WEI,
+        });
+        console.info("Deposit & bridge tx sent", {
+          hash: depositHash,
+          route: "citrea",
+          bridgeParams: CITREA_BRIDGE_PARAMS,
         });
       } else if (isPredepositDeposit) {
         if (!stablecoinAddress || !predepositChainNickname) {

@@ -9,9 +9,9 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPublicClient, erc20Abi, formatUnits, http } from "viem";
-import { useAccount, useBalance, useChainId, useReadContract } from "wagmi";
+import { useAccount, useBalance, useReadContract } from "wagmi";
 import { useOpportunityRoute } from "@/context";
-import { CHAIN_ID_BY_NAME, getChainNameById } from "@/lib/constants/chains";
+import { CHAIN_ID_BY_NAME, CHAINS } from "@/lib/constants/chains";
 import { getGenericUnitTokenAddress } from "@/lib/constants/contracts";
 import {
   getBridgeCoordinatorAddress,
@@ -103,11 +103,14 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
   const [open, setOpen] = useState(false);
   const { address: accountAddress } = useAccount();
   const { setRoute, setFlow } = useOpportunityRoute();
-  const chainId = useChainId();
-  const chainName = getChainNameById(chainId);
+  const chainName = CHAINS.MAINNET;
+  const mainnetChainId = CHAIN_ID_BY_NAME[CHAINS.MAINNET];
   const genericUnitTokenAddress = getGenericUnitTokenAddress(chainName);
   const gusdAddress = gusd.getAddress(chainName);
-  const { decimals: gusdDecimals } = useErc20Decimals(gusdAddress);
+  const { decimals: gusdDecimals } = useErc20Decimals(
+    gusdAddress,
+    mainnetChainId,
+  );
   const citreaClient = useMemo(
     () => createPublicClient({ transport: http(CITREA_RPC_URL) }),
     [],
@@ -119,7 +122,7 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
   const citreaFetchEnabled = Boolean(
     accountAddress && CITREA_WHITELABEL_ADDRESS,
   );
-  const predepositChainId = CHAIN_ID_BY_NAME[chainName];
+  const predepositChainId = mainnetChainId;
   const bridgeCoordinatorAddress = getBridgeCoordinatorAddress(chainName);
   const statusPredepositChainNickname =
     getPredepositChainNickname("predeposit");
@@ -127,7 +130,7 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
   const unitBalance = useBalance({
     address: accountAddress,
     token: genericUnitTokenAddress,
-    chainId,
+    chainId: mainnetChainId,
     query: {
       enabled: Boolean(accountAddress && genericUnitTokenAddress),
     },
@@ -136,7 +139,7 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
   const gusdBalance = useBalance({
     address: accountAddress,
     token: gusdAddress,
-    chainId,
+    chainId: mainnetChainId,
     query: {
       enabled: Boolean(accountAddress && gusdAddress),
     },

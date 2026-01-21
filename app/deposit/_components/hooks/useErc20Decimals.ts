@@ -5,9 +5,10 @@ import { type HexAddress, ZERO_ADDRESS } from "@/lib/types/address";
 
 type Address = HexAddress | undefined;
 
-export function useErc20Decimals(address: Address) {
+export function useErc20Decimals(address: Address, chainIdOverride?: number) {
   const targetAddress = address ?? ZERO_ADDRESS;
-  const chainId = useChainId();
+  const activeChainId = useChainId();
+  const chainId = chainIdOverride ?? activeChainId;
 
   const { data, ...rest } = useReadContract({
     address: targetAddress,

@@ -56,11 +56,11 @@ const ZERO_AMOUNT = BigInt(0);
 type HexBytes = `0x${string}`;
 type HexData = `0x${string}`;
 
-const CITREA_BRIDGE_TYPE = 1n;
-const CITREA_CHAIN_ID = 4114n;
+const CITREA_BRIDGE_TYPE = BigInt(1);
+const CITREA_CHAIN_ID = BigInt(4114);
 const CITREA_WHITELABEL =
   "0x000000000000000000000000ac8c1aeb584765db16ac3e08d4736cfce198589b" as const satisfies HexBytes;
-const CITREA_LZ_RECEIVE_GAS = 600_000n;
+const CITREA_LZ_RECEIVE_GAS = BigInt(600_000);
 
 const buildLzReceiveOptions = (gas: bigint): HexData => {
   const lzReceiveOption = encodePacked(["uint128"], [gas]);
@@ -73,7 +73,7 @@ const buildLzReceiveOptions = (gas: bigint): HexData => {
 
 const CITREA_BRIDGE_PARAMS = buildLzReceiveOptions(CITREA_LZ_RECEIVE_GAS);
 // TODO: replace with LayerZero fee quote when helper is available.
-const ESTIMATED_LZ_MESSAGE_FEE_WEI = 30414467417464n;
+const ESTIMATED_LZ_MESSAGE_FEE_WEI = BigInt("30414467417464");
 
 const toBytes32 = (value: HexBytes) =>
   `0x${value.slice(2).padStart(64, "0")}` as const;

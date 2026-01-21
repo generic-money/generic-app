@@ -111,7 +111,7 @@ type HexData = `0x${string}`;
 
 const MAINNET_CHAIN_ID = 1;
 const CITREA_CHAIN_ID_NUMBER = 4114;
-const CITREA_BRIDGE_TYPE = BigInt(1);
+const CITREA_BRIDGE_TYPE = 1;
 const CITREA_CHAIN_ID = BigInt(CITREA_CHAIN_ID_NUMBER);
 const L1_CHAIN_ID = BigInt(1);
 const BRIDGE_COORDINATOR_L2_ADDRESS =

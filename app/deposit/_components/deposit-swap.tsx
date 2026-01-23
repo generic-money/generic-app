@@ -124,7 +124,7 @@ const CITREA_WHITELABEL =
   "0x000000000000000000000000ac8c1aeb584765db16ac3e08d4736cfce198589b" as const satisfies HexBytes;
 const CITREA_BRIDGE_PARAMS = "0x" as const satisfies HexData;
 // TODO: replace with LayerZero fee quote when helper is available.
-const ESTIMATED_LZ_MESSAGE_FEE_WEI = BigInt("30414467417464");
+const ESTIMATED_LZ_MESSAGE_FEE_WEI = BigInt("23078868536475");
 
 const toBytes32 = (value: HexBytes) =>
   `0x${value.slice(2).padStart(64, "0")}` as const;

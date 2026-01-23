@@ -3,7 +3,7 @@
 import { ArrowUpDown } from "lucide-react";
 import Image from "next/image";
 import { type CSSProperties, useEffect, useMemo, useState } from "react";
-import { encodePacked, erc20Abi, erc4626Abi } from "viem";
+import { erc20Abi, erc4626Abi } from "viem";
 import {
   useAccount,
   useBalance,
@@ -122,18 +122,7 @@ const CITREA_WHITELABEL_ADDRESS =
   "0xAC8c1AEB584765DB16ac3e08D4736CFcE198589B" as const satisfies HexAddress;
 const CITREA_WHITELABEL =
   "0x000000000000000000000000ac8c1aeb584765db16ac3e08d4736cfce198589b" as const satisfies HexBytes;
-const CITREA_LZ_RECEIVE_GAS = BigInt(600_000);
-
-const buildLzReceiveOptions = (gas: bigint): HexData => {
-  const lzReceiveOption = encodePacked(["uint128"], [gas]);
-  const optionSize = (lzReceiveOption.length - 2) / 2 + 1;
-  return encodePacked(
-    ["uint16", "uint8", "uint16", "uint8", "bytes"],
-    [3, 1, optionSize, 1, lzReceiveOption],
-  ) as HexData;
-};
-
-const CITREA_BRIDGE_PARAMS = buildLzReceiveOptions(CITREA_LZ_RECEIVE_GAS);
+const CITREA_BRIDGE_PARAMS = "0x" as const satisfies HexData;
 // TODO: replace with LayerZero fee quote when helper is available.
 const ESTIMATED_LZ_MESSAGE_FEE_WEI = BigInt("30414467417464");
 

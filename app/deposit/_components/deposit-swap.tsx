@@ -2,8 +2,20 @@
 
 import { ArrowUpDown } from "lucide-react";
 import Image from "next/image";
-import { type CSSProperties, useEffect, useMemo, useState } from "react";
-import { erc20Abi, erc4626Abi, formatUnits, type PublicClient } from "viem";
+import {
+  type CSSProperties,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import {
+  erc20Abi,
+  erc4626Abi,
+  formatUnits,
+  type PublicClient,
+  parseUnits,
+} from "viem";
 import {
   useAccount,
   useBalance,
@@ -49,7 +61,7 @@ import { useErc20Decimals } from "./hooks/useErc20Decimals";
 import { useErc4626Preview } from "./hooks/useErc4626Preview";
 import { useTokenAllowance } from "./hooks/useTokenAllowance";
 import { SwapAssetPanel } from "./swap-asset-panel";
-import { formatBalanceText } from "./utils/format";
+import { formatBalanceText, formatTokenAmount } from "./utils/format";
 
 const depositorAbi =
   genericDepositorArtifact.abi as typeof genericDepositorArtifact.abi;
@@ -133,6 +145,15 @@ type BridgeMessage = {
   destinationWhitelabel: HexBytes;
   amount: bigint;
 };
+type TokenBalanceLike = {
+  isLoading: boolean;
+  isError: boolean;
+  data?: {
+    formatted?: string;
+    symbol?: string;
+    value?: bigint;
+  } | null;
+};
 
 const MAINNET_CHAIN_ID = 1;
 const CITREA_CHAIN_ID_NUMBER = 4114;
@@ -152,6 +173,8 @@ const CITREA_WHITELABEL_ADDRESS =
   "0xAC8c1AEB584765DB16ac3e08D4736CFcE198589B" as const satisfies HexAddress;
 const CITREA_WHITELABEL =
   "0x000000000000000000000000ac8c1aeb584765db16ac3e08d4736cfce198589b" as const satisfies HexBytes;
+const CITREA_VAULT_ADDRESS =
+  "0x5cA6Cb90b9E30B701a6036537f7576FAD1f247E9" as const satisfies HexAddress;
 const CITREA_BRIDGE_PARAMS = "0x" as const satisfies HexData;
 
 const toBytes32 = (value: HexBytes) =>
@@ -159,6 +182,32 @@ const toBytes32 = (value: HexBytes) =>
 
 const formatTxHash = (hash: HexBytes) =>
   `${hash.slice(0, 6)}...${hash.slice(-4)}`;
+
+const formatTokenBalanceText = (
+  balance: TokenBalanceLike,
+  accountAddress?: string,
+  fallbackSymbol = "",
+) => {
+  if (!accountAddress) {
+    return "Balance: —";
+  }
+
+  if (balance.isLoading) {
+    return "Balance: loading…";
+  }
+
+  if (balance.isError) {
+    return "Balance: unavailable";
+  }
+
+  const formatted = balance.data?.formatted;
+  if (!formatted) {
+    return `Balance: 0 ${fallbackSymbol}`.trim();
+  }
+
+  const symbol = balance.data?.symbol ?? fallbackSymbol;
+  return `Balance: ${formatTokenAmount(formatted, 6)} ${symbol}`.trim();
+};
 
 const estimateLzBridgeFee = async ({
   client,
@@ -380,6 +429,22 @@ export function DepositSwap() {
   );
   const [txError, setTxError] = useState<string | null>(null);
   const [postMintHref, setPostMintHref] = useState<string | null>(null);
+  const [stakeAfterBridge, setStakeAfterBridge] = useState(false);
+  const [stakeAmount, setStakeAmount] = useState("");
+  const [stakeAmountTouched, setStakeAmountTouched] = useState(false);
+  const [pendingStakeAmount, setPendingStakeAmount] = useState<bigint | null>(
+    null,
+  );
+  const [bridgeStakeState, setBridgeStakeState] = useState<
+    "idle" | "bridging" | "waiting" | "ready" | "staking" | "complete" | "error"
+  >("idle");
+  const [stakeError, setStakeError] = useState<string | null>(null);
+  const [citreaBalanceBaseline, setCitreaBalanceBaseline] = useState<
+    bigint | null
+  >(null);
+  const [autoSwitchRequested, setAutoSwitchRequested] = useState(false);
+  const [stakePanelShifted, setStakePanelShifted] = useState(false);
+  const [stakePanelVisible, setStakePanelVisible] = useState(false);
 
   useEffect(() => {
     if (!stablecoins.find((coin) => coin.ticker === selectedTicker)) {
@@ -450,6 +515,14 @@ export function DepositSwap() {
     stablecoinChainId,
   );
   const { decimals: gusdDecimals } = useErc20Decimals(gusdAddress, gusdChainId);
+  const { decimals: citreaGusdDecimals } = useErc20Decimals(
+    CITREA_WHITELABEL_ADDRESS,
+    CITREA_CHAIN_ID_NUMBER,
+  );
+  const { decimals: citreaVaultDecimals } = useErc20Decimals(
+    CITREA_VAULT_ADDRESS,
+    CITREA_CHAIN_ID_NUMBER,
+  );
 
   const isCitreaDeposit = isDepositFlow && depositRoute === "citrea";
   const isPredepositDeposit = isDepositFlow && depositRoute === "predeposit";
@@ -519,6 +592,26 @@ export function DepositSwap() {
     },
   });
 
+  const citreaGusdBalance = useBalance({
+    address: accountAddress,
+    token: CITREA_WHITELABEL_ADDRESS,
+    chainId: CITREA_CHAIN_ID_NUMBER,
+    watch: Boolean(accountAddress),
+    query: {
+      enabled: Boolean(accountAddress),
+    },
+  });
+
+  const citreaVaultBalance = useBalance({
+    address: accountAddress,
+    token: CITREA_VAULT_ADDRESS,
+    chainId: CITREA_CHAIN_ID_NUMBER,
+    watch: Boolean(accountAddress),
+    query: {
+      enabled: Boolean(accountAddress),
+    },
+  });
+
   const statusPredepositBalance = useMemo(() => {
     if (isStatusPredepositLoading) {
       return { isLoading: true, isError: false };
@@ -574,6 +667,30 @@ export function DepositSwap() {
     setFromAmount("");
   }, [selectedTicker, isDepositFlow, depositRoute, chainName]);
 
+  useEffect(() => {
+    if (depositRoute !== "citrea") {
+      setStakeAfterBridge(false);
+      setStakeAmountTouched(false);
+      setBridgeStakeState("idle");
+      setPendingStakeAmount(null);
+      setStakeError(null);
+      setCitreaBalanceBaseline(null);
+      setAutoSwitchRequested(false);
+    }
+  }, [depositRoute]);
+
+  useEffect(() => {
+    if (
+      !stakeAfterBridge ||
+      stakeAmountTouched ||
+      (bridgeStakeState !== "idle" && bridgeStakeState !== "complete")
+    ) {
+      return;
+    }
+
+    setStakeAmount(fromAmount);
+  }, [bridgeStakeState, fromAmount, stakeAfterBridge, stakeAmountTouched]);
+
   const fromBalanceText = formatBalanceText(
     fromBalanceHook,
     accountAddress,
@@ -598,6 +715,17 @@ export function DepositSwap() {
     const value = fromBalanceHook.data?.formatted;
     if (value) {
       setFromAmount(value);
+    }
+  };
+
+  const canUseStakeMax =
+    Boolean(accountAddress) && Boolean(citreaGusdBalance.data?.formatted);
+
+  const handleStakeMaxClick = () => {
+    const value = citreaGusdBalance.data?.formatted;
+    if (value) {
+      setStakeAmount(value);
+      setStakeAmountTouched(true);
     }
   };
 
@@ -659,6 +787,14 @@ export function DepositSwap() {
     spender: isCitreaReturnFlow ? BRIDGE_COORDINATOR_L2_ADDRESS : undefined,
   });
 
+  const { allowance: stakeAllowance, refetchAllowance: refetchStakeAllowance } =
+    useTokenAllowance({
+      token: CITREA_WHITELABEL_ADDRESS,
+      owner: accountAddress,
+      spender: CITREA_VAULT_ADDRESS,
+      chainIdOverride: CITREA_CHAIN_ID_NUMBER,
+    });
+
   const needsDepositApproval = useMemo(() => {
     if (!parsedAmount || !isDepositFlow) {
       return false;
@@ -694,12 +830,165 @@ export function DepositSwap() {
       fromBalanceValue !== undefined &&
       parsedAmount > fromBalanceValue,
   );
+  const stakeParsedAmount = useMemo(() => {
+    if (!citreaGusdDecimals || stakeAmount.trim() === "") {
+      return null;
+    }
 
+    try {
+      return parseUnits(stakeAmount, citreaGusdDecimals);
+    } catch {
+      return null;
+    }
+  }, [citreaGusdDecimals, stakeAmount]);
+  const stakeTargetAmount = pendingStakeAmount ?? stakeParsedAmount;
+  const stakeBalanceValue = citreaGusdBalance.data?.value;
+  const stakeInsufficientBalance = Boolean(
+    stakeTargetAmount &&
+      stakeBalanceValue !== undefined &&
+      stakeTargetAmount > stakeBalanceValue,
+  );
+  const needsStakeApproval = Boolean(
+    stakeTargetAmount && stakeAllowance < stakeTargetAmount,
+  );
+  const stakePreviewAmount = stakeTargetAmount ?? BigInt(0);
+  const stakePreviewEnabled = Boolean(
+    stakeTargetAmount && stakeTargetAmount > ZERO_AMOUNT,
+  );
+  const { data: stakePreviewShares } = useReadContract({
+    address: CITREA_VAULT_ADDRESS,
+    abi: erc4626Abi,
+    chainId: CITREA_CHAIN_ID_NUMBER,
+    functionName: "previewDeposit",
+    args: [stakePreviewAmount],
+    query: {
+      enabled: stakePreviewEnabled,
+    },
+  });
+  const stakePreviewText =
+    stakePreviewShares != null && citreaVaultDecimals != null
+      ? formatTokenAmount(
+          formatUnits(stakePreviewShares, citreaVaultDecimals),
+          6,
+        )
+      : "—";
+  const stakeBalanceText = formatTokenBalanceText(
+    citreaGusdBalance,
+    accountAddress,
+    "GUSD",
+  );
+  const stakePositionText = formatTokenBalanceText(
+    citreaVaultBalance,
+    accountAddress,
+    "shares",
+  ).replace(/^Balance:/, "Staked:");
+  const hasCitreaStakePosition =
+    (citreaVaultBalance.data?.value ?? ZERO_AMOUNT) > ZERO_AMOUNT;
+  const hasCitreaGusdBalance =
+    (citreaGusdBalance.data?.value ?? ZERO_AMOUNT) > ZERO_AMOUNT;
+  const showStakePanel =
+    depositRoute === "citrea" &&
+    (stakeAfterBridge ||
+      hasCitreaStakePosition ||
+      hasCitreaGusdBalance ||
+      bridgeStakeState !== "idle");
+  const showStakeActionButton = Boolean(accountAddress && hasCitreaGusdBalance);
+
+  useEffect(() => {
+    let visibleTimeout: number | undefined;
+    let shiftTimeout: number | undefined;
+
+    if (showStakePanel) {
+      setStakePanelShifted(true);
+      visibleTimeout = window.setTimeout(() => {
+        setStakePanelVisible(true);
+      }, 560);
+    } else {
+      setStakePanelVisible(false);
+      shiftTimeout = window.setTimeout(() => {
+        setStakePanelShifted(false);
+      }, 320);
+    }
+
+    return () => {
+      if (visibleTimeout) {
+        window.clearTimeout(visibleTimeout);
+      }
+      if (shiftTimeout) {
+        window.clearTimeout(shiftTimeout);
+      }
+    };
+  }, [showStakePanel]);
+
+  useEffect(() => {
+    if (bridgeStakeState !== "waiting" || !citreaGusdBalance.refetch) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void citreaGusdBalance.refetch();
+    }, 10000);
+
+    return () => window.clearInterval(interval);
+  }, [bridgeStakeState, citreaGusdBalance]);
+
+  useEffect(() => {
+    if (
+      bridgeStakeState !== "waiting" ||
+      !pendingStakeAmount ||
+      stakeBalanceValue === undefined
+    ) {
+      return;
+    }
+
+    const baseline = citreaBalanceBaseline ?? ZERO_AMOUNT;
+    if (stakeBalanceValue >= baseline + pendingStakeAmount) {
+      setBridgeStakeState("ready");
+    }
+  }, [
+    bridgeStakeState,
+    citreaBalanceBaseline,
+    pendingStakeAmount,
+    stakeBalanceValue,
+  ]);
+
+  useEffect(() => {
+    if (
+      bridgeStakeState !== "ready" ||
+      !stakeAfterBridge ||
+      activeChainId === CITREA_CHAIN_ID_NUMBER ||
+      !switchChainAsync ||
+      autoSwitchRequested
+    ) {
+      return;
+    }
+
+    setAutoSwitchRequested(true);
+    switchChainAsync({ chainId: CITREA_CHAIN_ID_NUMBER }).catch(() =>
+      setAutoSwitchRequested(false),
+    );
+  }, [
+    activeChainId,
+    autoSwitchRequested,
+    bridgeStakeState,
+    stakeAfterBridge,
+    switchChainAsync,
+  ]);
+
+  const isBridgeAndStakeFlow = isCitreaDeposit && stakeAfterBridge;
   const depositActionLabel =
-    depositRoute === "predeposit" ? "Predeposit" : "Mint";
+    depositRoute === "predeposit"
+      ? "Predeposit"
+      : isBridgeAndStakeFlow
+        ? "Bridge & Stake"
+        : "Mint";
 
   const depositButtonLabel =
-    depositRoute === "predeposit" ? "Predeposit" : "Mint";
+    depositRoute === "predeposit"
+      ? "Predeposit"
+      : isBridgeAndStakeFlow
+        ? "Bridge & Stake"
+        : "Mint";
   const redeemActionLabel = isCitreaReturnFlow ? "Bridge" : "Redeem";
 
   const buttonState = useMemo(() => {
@@ -797,6 +1086,66 @@ export function DepositSwap() {
     insufficientBalance,
   ]);
 
+  const stakeToggleDisabled =
+    bridgeStakeState === "bridging" ||
+    bridgeStakeState === "waiting" ||
+    bridgeStakeState === "ready" ||
+    bridgeStakeState === "staking";
+
+  const stakeButtonState = useMemo(() => {
+    if (!accountAddress) {
+      return { label: "Connect wallet", disabled: true };
+    }
+
+    if (bridgeStakeState === "bridging" || bridgeStakeState === "waiting") {
+      return { label: "Waiting for bridge…", disabled: true };
+    }
+
+    if (bridgeStakeState === "staking") {
+      return { label: "Staking…", disabled: true };
+    }
+
+    if (bridgeStakeState === "complete") {
+      return { label: "Staked", disabled: true };
+    }
+
+    if (!stakeTargetAmount || stakeTargetAmount <= ZERO_AMOUNT) {
+      return { label: "Enter amount", disabled: true };
+    }
+
+    if (stakeInsufficientBalance) {
+      return { label: "Insufficient balance", disabled: true };
+    }
+
+    if (activeChainId !== CITREA_CHAIN_ID_NUMBER) {
+      return { label: "Switch to Citrea", disabled: !switchChainAsync };
+    }
+
+    if (needsStakeApproval) {
+      return { label: "Approve & Stake", disabled: false };
+    }
+
+    if (bridgeStakeState === "error") {
+      return { label: "Retry stake", disabled: false };
+    }
+
+    return { label: "Stake", disabled: false };
+  }, [
+    accountAddress,
+    activeChainId,
+    bridgeStakeState,
+    needsStakeApproval,
+    stakeInsufficientBalance,
+    stakeTargetAmount,
+    switchChainAsync,
+  ]);
+
+  const stakeInputDisabled =
+    bridgeStakeState === "bridging" ||
+    bridgeStakeState === "waiting" ||
+    bridgeStakeState === "ready" ||
+    bridgeStakeState === "staking";
+
   const handleDeposit = async () => {
     if (
       !accountAddress ||
@@ -851,6 +1200,16 @@ export function DepositSwap() {
           !BRIDGE_COORDINATOR_L1_ADDRESS
         ) {
           return;
+        }
+        if (stakeAfterBridge) {
+          const targetAmount =
+            stakeParsedAmount && stakeParsedAmount > ZERO_AMOUNT
+              ? stakeParsedAmount
+              : parsedAmount;
+          setPendingStakeAmount(targetAmount);
+          setBridgeStakeState("bridging");
+          setStakeError(null);
+          setCitreaBalanceBaseline(stakeBalanceValue ?? ZERO_AMOUNT);
         }
         const remoteRecipient = toBytes32(accountAddress);
         const sender = toBytes32(accountAddress);
@@ -962,6 +1321,10 @@ export function DepositSwap() {
       notifyTxSubmitted(depositActionLabel, depositHash);
       await publicClient.waitForTransactionReceipt({ hash: depositHash });
       notifyTxConfirmed(depositActionLabel, depositHash);
+      if (isCitreaDeposit && stakeAfterBridge) {
+        // TODO: replace balance polling with LayerZero message status tracking.
+        setBridgeStakeState("waiting");
+      }
 
       const opportunityHref = getOpportunityHref(routeAtSubmit);
       if (opportunityHref) {
@@ -986,6 +1349,10 @@ export function DepositSwap() {
       const message =
         error instanceof Error ? error.message : "Transaction failed";
       setTxError(message);
+      if (isCitreaDeposit && stakeAfterBridge) {
+        setBridgeStakeState("error");
+        setStakeError(message);
+      }
       pushAlert({
         type: "error",
         title: "Transaction failed",
@@ -1117,6 +1484,119 @@ export function DepositSwap() {
       setTxStep("idle");
     }
   };
+
+  const handleStake = useCallback(
+    async (amountOverride?: bigint) => {
+      if (
+        !accountAddress ||
+        activeChainId !== CITREA_CHAIN_ID_NUMBER ||
+        !publicClient
+      ) {
+        return;
+      }
+
+      const targetAmount = amountOverride ?? stakeParsedAmount;
+      if (!targetAmount || targetAmount <= ZERO_AMOUNT) {
+        return;
+      }
+
+      setStakeError(null);
+      setBridgeStakeState("staking");
+
+      try {
+        if (stakeAllowance < targetAmount) {
+          console.info("Stake approval call", {
+            functionName: "approve",
+            address: CITREA_WHITELABEL_ADDRESS,
+            chainId: activeChainId,
+            args: [CITREA_VAULT_ADDRESS, targetAmount],
+          });
+          const approvalHash = await writeContractAsync({
+            abi: erc20Abi,
+            address: CITREA_WHITELABEL_ADDRESS,
+            chainId: activeChainId,
+            functionName: "approve",
+            args: [CITREA_VAULT_ADDRESS, targetAmount],
+          });
+          notifyTxSubmitted("Stake approval", approvalHash);
+          await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+          notifyTxConfirmed("Stake approval", approvalHash);
+          await refetchStakeAllowance?.();
+        }
+
+        console.info("Stake deposit call", {
+          functionName: "deposit",
+          address: CITREA_VAULT_ADDRESS,
+          chainId: activeChainId,
+          args: [targetAmount, accountAddress],
+        });
+        const stakeHash = await writeContractAsync({
+          abi: erc4626Abi,
+          address: CITREA_VAULT_ADDRESS,
+          chainId: activeChainId,
+          functionName: "deposit",
+          args: [targetAmount, accountAddress],
+        });
+        notifyTxSubmitted("Stake", stakeHash);
+        await publicClient.waitForTransactionReceipt({ hash: stakeHash });
+        notifyTxConfirmed("Stake", stakeHash);
+
+        setBridgeStakeState("complete");
+        setPendingStakeAmount(null);
+        setAutoSwitchRequested(false);
+        const refetches: Promise<unknown>[] = [];
+        if (citreaGusdBalance.refetch) {
+          refetches.push(citreaGusdBalance.refetch());
+        }
+        if (citreaVaultBalance.refetch) {
+          refetches.push(citreaVaultBalance.refetch());
+        }
+        if (refetches.length) {
+          await Promise.allSettled(refetches);
+        }
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Staking failed";
+        setStakeError(message);
+        setBridgeStakeState("error");
+        pushAlert({
+          type: "error",
+          title: "Staking failed",
+          message,
+        });
+      }
+    },
+    [
+      accountAddress,
+      activeChainId,
+      citreaGusdBalance.refetch,
+      citreaVaultBalance.refetch,
+      publicClient,
+      refetchStakeAllowance,
+      stakeAllowance,
+      stakeParsedAmount,
+      writeContractAsync,
+    ],
+  );
+
+  useEffect(() => {
+    if (
+      bridgeStakeState !== "ready" ||
+      !stakeAfterBridge ||
+      activeChainId !== CITREA_CHAIN_ID_NUMBER ||
+      !pendingStakeAmount
+    ) {
+      return;
+    }
+
+    void handleStake(pendingStakeAmount);
+  }, [
+    activeChainId,
+    bridgeStakeState,
+    handleStake,
+    pendingStakeAmount,
+    stakeAfterBridge,
+  ]);
 
   const handleRedeem = async () => {
     if (isCitreaReturnFlow) {
@@ -1292,6 +1772,33 @@ export function DepositSwap() {
     await handleRedeem();
   };
 
+  const handleStakeAction = async () => {
+    if (!accountAddress) {
+      return;
+    }
+
+    if (bridgeStakeState === "bridging" || bridgeStakeState === "waiting") {
+      return;
+    }
+
+    if (activeChainId !== CITREA_CHAIN_ID_NUMBER) {
+      if (switchChainAsync) {
+        await switchChainAsync({ chainId: CITREA_CHAIN_ID_NUMBER });
+      }
+      return;
+    }
+
+    if (
+      !stakeTargetAmount ||
+      stakeTargetAmount <= ZERO_AMOUNT ||
+      stakeInsufficientBalance
+    ) {
+      return;
+    }
+
+    await handleStake(stakeTargetAmount);
+  };
+
   const depositFromChainLabel = "Ethereum";
   const depositToChainLabel =
     depositRoute === "citrea"
@@ -1391,90 +1898,233 @@ export function DepositSwap() {
           </div>
         </fieldset>
         <div className="flex w-full justify-center" id="deposit-form">
-          <div className="flex w-full max-w-md flex-col gap-6 rounded-3xl border border-border/60 bg-card/80 p-8 shadow-[0_35px_60px_-40px_rgba(15,23,42,0.45)] backdrop-blur">
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-[0.3em] text-muted-foreground">
-                <span>
-                  {isDepositFlow
-                    ? depositRoute === "predeposit"
-                      ? "Predeposit"
-                      : "Mint"
-                    : "Redeem"}
-                </span>
-                <span>{selectedOpportunity.eyebrow}</span>
+          <div
+            className={cn(
+              "flex w-full flex-col items-center gap-6 max-w-md md:max-w-6xl md:flex-row md:items-start md:justify-center",
+            )}
+          >
+            <div
+              className={cn(
+                "flex w-full max-w-md shrink-0 flex-col gap-6 rounded-3xl border border-border/60 bg-card/80 p-8 shadow-[0_35px_60px_-40px_rgba(15,23,42,0.45)] backdrop-blur transition-transform duration-700 md:w-[32rem] md:max-w-none",
+                stakePanelShifted
+                  ? "md:translate-x-0"
+                  : "md:translate-x-[12.75rem]",
+              )}
+            >
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-[0.3em] text-muted-foreground">
+                  <span>
+                    {isDepositFlow
+                      ? depositRoute === "predeposit"
+                        ? "Predeposit"
+                        : "Mint"
+                      : "Redeem"}
+                  </span>
+                  <span>{selectedOpportunity.eyebrow}</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {formDescription}
+                </p>
               </div>
-              <p className="text-xs text-muted-foreground">{formDescription}</p>
+              <div className="flex flex-col gap-4">
+                <SwapAssetPanel
+                  label="From"
+                  chainLabel={fromChainLabel}
+                  selector={renderAssetSelector(fromAssetType)}
+                  inputProps={{
+                    placeholder: fromPlaceholder,
+                    autoComplete: "off",
+                    value: fromAmount,
+                    onChange: (event) => {
+                      setPostMintHref(null);
+                      setFromAmount(event.target.value);
+                    },
+                  }}
+                  balance={{
+                    text: fromBalanceText,
+                    interactive: canUseMax,
+                    onClick: canUseMax ? handleMaxClick : undefined,
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={handleSwitchDirection}
+                  disabled={!canSwitchDirection}
+                  aria-label="Switch direction"
+                  className="mx-auto flex h-10 w-10 items-center justify-center rounded-full border border-border/60 bg-background/80 text-muted-foreground shadow-sm transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ArrowUpDown className="h-4 w-4" />
+                </button>
+                <SwapAssetPanel
+                  label="To"
+                  chainLabel={toChainLabel}
+                  selector={renderAssetSelector(toAssetType)}
+                  inputProps={{
+                    placeholder: toPlaceholder,
+                    disabled: true,
+                    readOnly: true,
+                    value: estimatedToAmount,
+                  }}
+                  balance={{
+                    text: finalToBalanceText,
+                  }}
+                />
+              </div>
+              {isDepositFlow && depositRoute === "citrea" ? (
+                <div className="rounded-2xl border border-border/60 bg-background/70 p-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
+                        Stake after bridge
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Automatically stake Citrea GUSD when funds arrive.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={stakeAfterBridge}
+                      disabled={stakeToggleDisabled}
+                      onClick={() => setStakeAfterBridge((current) => !current)}
+                      className={cn(
+                        "flex h-7 w-12 items-center rounded-full border border-border/70 p-1 transition",
+                        stakeAfterBridge ? "bg-primary/90" : "bg-muted/60",
+                        stakeToggleDisabled && "cursor-not-allowed opacity-60",
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "h-5 w-5 rounded-full bg-white shadow-sm transition-transform",
+                          stakeAfterBridge ? "translate-x-5" : "translate-x-0",
+                        )}
+                      />
+                    </button>
+                  </div>
+                  {hasCitreaStakePosition ? (
+                    <p className="mt-3 text-[11px] font-medium text-muted-foreground">
+                      Position detected — staking panel unlocked.
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+              {postMintHref &&
+              isDepositFlow &&
+              !txError &&
+              txStep === "idle" ? (
+                <a
+                  href={postMintHref}
+                  className="flex h-11 items-center justify-center rounded-xl bg-gradient-to-r from-primary via-primary/90 to-primary/95 text-sm font-semibold text-primary-foreground transition hover:from-primary/90 hover:via-primary/80 hover:to-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                >
+                  View opportunity
+                </a>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handlePrimaryAction}
+                  disabled={buttonState.disabled}
+                  className="h-11 rounded-xl bg-gradient-to-r from-primary via-primary/90 to-primary/95 text-sm font-semibold text-primary-foreground transition hover:from-primary/90 hover:via-primary/80 hover:to-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {buttonState.label}
+                </button>
+              )}
+              {!txError && insufficientBalance ? (
+                <p className="text-center text-xs text-destructive">
+                  Amount exceeds available balance. Click your balance to use
+                  the max.
+                </p>
+              ) : null}
+              {txError ? (
+                <p className="text-center text-xs text-destructive">
+                  {txError}
+                </p>
+              ) : null}
             </div>
-            <div className="flex flex-col gap-4">
+            <div
+              className={cn(
+                "flex w-full max-w-md shrink-0 flex-col gap-6 rounded-3xl border border-border/60 bg-card/80 p-8 shadow-[0_35px_60px_-40px_rgba(15,23,42,0.45)] backdrop-blur transition-[opacity,transform] duration-450 md:w-[24rem] md:max-w-none",
+                stakePanelShifted ? "md:translate-x-0" : "md:translate-x-2",
+                stakePanelVisible
+                  ? "opacity-100"
+                  : "pointer-events-none opacity-0 max-h-0 overflow-hidden md:max-h-none md:overflow-visible",
+              )}
+              aria-hidden={!stakePanelVisible}
+            >
+              <div className="space-y-2">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted-foreground">
+                      Citrea staking
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Deposit Citrea GUSD into the vault to earn yield.
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-border/60 bg-background/80 px-2.5 py-1 text-[11px] font-semibold text-foreground/80">
+                    APY —
+                  </span>
+                </div>
+              </div>
               <SwapAssetPanel
-                label="From"
-                chainLabel={fromChainLabel}
-                selector={renderAssetSelector(fromAssetType)}
+                label="Stake"
+                chainLabel="Citrea"
+                selector={renderAssetSelector("gusd")}
                 inputProps={{
-                  placeholder: fromPlaceholder,
+                  placeholder: "Amount in GUSD",
                   autoComplete: "off",
-                  value: fromAmount,
+                  value: stakeAmount,
+                  disabled: stakeInputDisabled,
                   onChange: (event) => {
-                    setPostMintHref(null);
-                    setFromAmount(event.target.value);
+                    setStakeAmount(event.target.value);
+                    setStakeAmountTouched(true);
                   },
                 }}
                 balance={{
-                  text: fromBalanceText,
-                  interactive: canUseMax,
-                  onClick: canUseMax ? handleMaxClick : undefined,
+                  text: stakeBalanceText,
+                  interactive: canUseStakeMax && !stakeInputDisabled,
+                  onClick:
+                    canUseStakeMax && !stakeInputDisabled
+                      ? handleStakeMaxClick
+                      : undefined,
                 }}
               />
-              <button
-                type="button"
-                onClick={handleSwitchDirection}
-                disabled={!canSwitchDirection}
-                aria-label="Switch direction"
-                className="mx-auto flex h-10 w-10 items-center justify-center rounded-full border border-border/60 bg-background/80 text-muted-foreground shadow-sm transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <ArrowUpDown className="h-4 w-4" />
-              </button>
-              <SwapAssetPanel
-                label="To"
-                chainLabel={toChainLabel}
-                selector={renderAssetSelector(toAssetType)}
-                inputProps={{
-                  placeholder: toPlaceholder,
-                  disabled: true,
-                  readOnly: true,
-                  value: estimatedToAmount,
-                }}
-                balance={{
-                  text: finalToBalanceText,
-                }}
-              />
+              <div className="rounded-2xl border border-border/60 bg-background/70 p-4 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">
+                    Est. vault shares
+                  </span>
+                  <span className="font-semibold text-foreground">
+                    {stakePreviewText}
+                  </span>
+                </div>
+                <div className="mt-2 flex items-center justify-between">
+                  <span className="text-muted-foreground">Current stake</span>
+                  <span className="font-semibold text-foreground">
+                    {stakePositionText.replace("Staked:", "").trim() || "—"}
+                  </span>
+                </div>
+              </div>
+              {showStakeActionButton ? (
+                <button
+                  type="button"
+                  onClick={handleStakeAction}
+                  disabled={stakeButtonState.disabled}
+                  className="h-11 rounded-xl bg-gradient-to-r from-primary via-primary/90 to-primary/95 text-sm font-semibold text-primary-foreground transition hover:from-primary/90 hover:via-primary/80 hover:to-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {stakeButtonState.label}
+                </button>
+              ) : null}
+              {!stakeError && stakeInsufficientBalance ? (
+                <p className="text-center text-xs text-destructive">
+                  Stake amount exceeds your Citrea balance.
+                </p>
+              ) : null}
+              {stakeError ? (
+                <p className="text-center text-xs text-destructive">
+                  {stakeError}
+                </p>
+              ) : null}
             </div>
-            {postMintHref && isDepositFlow && !txError && txStep === "idle" ? (
-              <a
-                href={postMintHref}
-                className="flex h-11 items-center justify-center rounded-xl bg-gradient-to-r from-primary via-primary/90 to-primary/95 text-sm font-semibold text-primary-foreground transition hover:from-primary/90 hover:via-primary/80 hover:to-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-              >
-                View opportunity
-              </a>
-            ) : (
-              <button
-                type="button"
-                onClick={handlePrimaryAction}
-                disabled={buttonState.disabled}
-                className="h-11 rounded-xl bg-gradient-to-r from-primary via-primary/90 to-primary/95 text-sm font-semibold text-primary-foreground transition hover:from-primary/90 hover:via-primary/80 hover:to-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {buttonState.label}
-              </button>
-            )}
-            {!txError && insufficientBalance ? (
-              <p className="text-center text-xs text-destructive">
-                Amount exceeds available balance. Click your balance to use the
-                max.
-              </p>
-            ) : null}
-            {txError ? (
-              <p className="text-center text-xs text-destructive">{txError}</p>
-            ) : null}
           </div>
         </div>
       </div>

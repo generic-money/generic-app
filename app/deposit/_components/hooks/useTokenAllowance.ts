@@ -7,11 +7,18 @@ type Params = {
   token?: HexAddress;
   owner?: HexAddress;
   spender?: HexAddress;
+  chainIdOverride?: number;
 };
 
-export function useTokenAllowance({ token, owner, spender }: Params) {
+export function useTokenAllowance({
+  token,
+  owner,
+  spender,
+  chainIdOverride,
+}: Params) {
   const enabled = Boolean(token && owner && spender);
-  const chainId = useChainId();
+  const activeChainId = useChainId();
+  const chainId = chainIdOverride ?? activeChainId;
 
   const { data, refetch, ...rest } = useReadContract({
     address: token ?? ZERO_ADDRESS,

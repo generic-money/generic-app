@@ -58,6 +58,8 @@ const USD_PRECISION = 2;
 const CITREA_RPC_URL = "https://rpc.mainnet.citrea.xyz";
 const CITREA_WHITELABEL_ADDRESS =
   "0xAC8c1AEB584765DB16ac3e08D4736CFcE198589B" as const satisfies HexAddress;
+const CITREA_VAULT_ADDRESS =
+  "0x5cA6Cb90b9E30B701a6036537f7576FAD1f247E9" as const satisfies HexAddress;
 
 const formatTokenBalance = (balance: BalanceLike, accountAddress?: string) => {
   if (!accountAddress) {
@@ -119,8 +121,19 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
   const [citreaBalance, setCitreaBalance] = useState<bigint | null>(null);
   const [isCitreaBalanceLoading, setIsCitreaBalanceLoading] = useState(false);
   const [isCitreaBalanceError, setIsCitreaBalanceError] = useState(false);
+  const [citreaVaultDecimals, setCitreaVaultDecimals] = useState<number | null>(
+    null,
+  );
+  const [citreaVaultBalance, setCitreaVaultBalance] = useState<bigint | null>(
+    null,
+  );
+  const [isCitreaVaultLoading, setIsCitreaVaultLoading] = useState(false);
+  const [isCitreaVaultError, setIsCitreaVaultError] = useState(false);
   const citreaFetchEnabled = Boolean(
     accountAddress && CITREA_WHITELABEL_ADDRESS,
+  );
+  const citreaVaultFetchEnabled = Boolean(
+    accountAddress && CITREA_VAULT_ADDRESS,
   );
   const predepositChainId = mainnetChainId;
   const bridgeCoordinatorAddress = getBridgeCoordinatorAddress(chainName);
@@ -228,6 +241,69 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
     };
   }, [accountAddress, citreaClient, citreaDecimals, citreaFetchEnabled]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!citreaVaultFetchEnabled) {
+      setCitreaVaultBalance(null);
+      setIsCitreaVaultLoading(false);
+      setIsCitreaVaultError(false);
+      return;
+    }
+
+    setIsCitreaVaultLoading(true);
+    setIsCitreaVaultError(false);
+
+    const fetchBalance = async () => {
+      try {
+        const [decimals, balance] = await Promise.all([
+          citreaVaultDecimals ??
+            citreaClient.readContract({
+              abi: erc20Abi,
+              address: CITREA_VAULT_ADDRESS,
+              functionName: "decimals",
+            }),
+          citreaClient.readContract({
+            abi: erc20Abi,
+            address: CITREA_VAULT_ADDRESS,
+            functionName: "balanceOf",
+            args: [accountAddress as HexAddress],
+          }),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        if (citreaVaultDecimals == null) {
+          setCitreaVaultDecimals(Number(decimals));
+        }
+
+        setCitreaVaultBalance(balance as bigint);
+      } catch (error) {
+        if (!cancelled) {
+          console.error("Citrea vault balance fetch error", error);
+          setIsCitreaVaultError(true);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsCitreaVaultLoading(false);
+        }
+      }
+    };
+
+    fetchBalance();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    accountAddress,
+    citreaClient,
+    citreaVaultDecimals,
+    citreaVaultFetchEnabled,
+  ]);
+
   const citreaBalanceValue = useMemo(() => {
     if (!accountAddress) {
       return "—";
@@ -277,6 +353,32 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
   ]);
 
   const hasCitreaBalance = (citreaBalance ?? BigInt(0)) > BigInt(0);
+  const citreaVaultBalanceValue = useMemo(() => {
+    if (!accountAddress) {
+      return "—";
+    }
+
+    if (isCitreaVaultLoading) {
+      return "Loading…";
+    }
+
+    if (
+      isCitreaVaultError ||
+      citreaVaultBalance == null ||
+      citreaVaultDecimals == null
+    ) {
+      return "Unavailable";
+    }
+
+    return `${formatTokenAmount(formatUnits(citreaVaultBalance, citreaVaultDecimals), POSITION_PRECISION)} sGUSD`.trim();
+  }, [
+    accountAddress,
+    citreaVaultBalance,
+    citreaVaultDecimals,
+    isCitreaVaultError,
+    isCitreaVaultLoading,
+  ]);
+  const hasCitreaVaultBalance = (citreaVaultBalance ?? BigInt(0)) > BigInt(0);
 
   const unitTokenValue = useMemo(
     () => formatTokenBalance(unitBalance, accountAddress),
@@ -358,7 +460,12 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
   const hasStatusPredeposit =
     (statusPredepositAmount ?? zeroBigInt) > zeroBigInt;
   const positionsCount = accountAddress
-    ? [hasGusd, hasStatusPredeposit, hasCitreaBalance].filter(Boolean).length
+    ? [
+        hasGusd,
+        hasStatusPredeposit,
+        hasCitreaBalance,
+        hasCitreaVaultBalance,
+      ].filter(Boolean).length
     : 0;
   const showEmptyState = positionsCount === 0;
 
@@ -497,6 +604,36 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
                         className="rounded-full border border-border/60 bg-background/70 px-3 py-1 text-[11px] font-semibold text-foreground/80 transition hover:border-primary/30 hover:bg-background hover:text-foreground"
                       >
                         Mint
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {hasCitreaVaultBalance ? (
+                <div className="rounded-2xl border border-primary/20 bg-primary/10 p-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 text-foreground/70">
+                        <Sparkles className="h-4 w-4" />
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.22em]">
+                          Citrea sGUSD
+                        </p>
+                      </div>
+                      <p className="mt-2 text-xl font-semibold text-foreground">
+                        {citreaVaultBalanceValue}
+                      </p>
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        Vault shares
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 flex-col items-end">
+                      <button
+                        type="button"
+                        onClick={() => handleSelectOpportunity("citrea")}
+                        className="rounded-full border border-border/60 bg-background/70 px-3 py-1 text-[11px] font-semibold text-foreground/80 transition hover:border-primary/30 hover:bg-background hover:text-foreground"
+                      >
+                        Stake
                       </button>
                     </div>
                   </div>

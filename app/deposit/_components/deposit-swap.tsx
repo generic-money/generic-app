@@ -609,7 +609,6 @@ export function DepositSwap() {
     address: accountAddress,
     token: CITREA_WHITELABEL_ADDRESS,
     chainId: CITREA_CHAIN_ID_NUMBER,
-    watch: Boolean(accountAddress),
     query: {
       enabled: Boolean(accountAddress),
     },
@@ -619,7 +618,6 @@ export function DepositSwap() {
     address: accountAddress,
     token: CITREA_VAULT_ADDRESS,
     chainId: CITREA_CHAIN_ID_NUMBER,
-    watch: Boolean(accountAddress),
     query: {
       enabled: Boolean(accountAddress),
     },
@@ -868,7 +866,13 @@ export function DepositSwap() {
     : isCitreaReturnFlow
       ? needsCitreaApproval
       : needsRedeemApproval;
-  const fromBalanceValue = fromBalanceHook.data?.value;
+  const fromBalanceValue = (() => {
+    const data = fromBalanceHook.data;
+    if (data && typeof data === "object" && "value" in data) {
+      return (data as { value?: bigint }).value;
+    }
+    return undefined;
+  })();
   const insufficientBalance = Boolean(
     parsedAmount &&
       fromBalanceValue !== undefined &&

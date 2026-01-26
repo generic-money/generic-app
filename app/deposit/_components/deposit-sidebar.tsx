@@ -17,6 +17,11 @@ import {
   getBridgeCoordinatorAddress,
   getPredepositChainNickname,
 } from "@/lib/constants/predeposit";
+import {
+  isFinalLzStatus,
+  type LzBridgeRecord,
+  loadLzBridgeRecords,
+} from "@/lib/layerzero/scan";
 import { gusd } from "@/lib/models/tokens";
 import { type HexAddress, ZERO_ADDRESS } from "@/lib/types/address";
 import { cn } from "@/lib/utils";
@@ -129,6 +134,7 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
   );
   const [isCitreaVaultLoading, setIsCitreaVaultLoading] = useState(false);
   const [isCitreaVaultError, setIsCitreaVaultError] = useState(false);
+  const [lzBridgeRecords, setLzBridgeRecords] = useState<LzBridgeRecord[]>([]);
   const citreaFetchEnabled = Boolean(
     accountAddress && CITREA_WHITELABEL_ADDRESS,
   );
@@ -304,6 +310,24 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
     citreaVaultFetchEnabled,
   ]);
 
+  useEffect(() => {
+    const loadRecords = () => setLzBridgeRecords(loadLzBridgeRecords());
+    loadRecords();
+
+    const interval = window.setInterval(loadRecords, 15000);
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key) {
+        loadRecords();
+      }
+    };
+
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.clearInterval(interval);
+    };
+  }, []);
+
   const citreaBalanceValue = useMemo(() => {
     if (!accountAddress) {
       return "—";
@@ -379,6 +403,29 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
     isCitreaVaultLoading,
   ]);
   const hasCitreaVaultBalance = (citreaVaultBalance ?? BigInt(0)) > BigInt(0);
+  const pendingBridgeRecords = useMemo(() => {
+    if (!accountAddress) {
+      return [];
+    }
+
+    return lzBridgeRecords.filter(
+      (record) =>
+        record.account.toLowerCase() === accountAddress.toLowerCase() &&
+        !isFinalLzStatus(record.status),
+    );
+  }, [accountAddress, lzBridgeRecords]);
+  const pendingBridgeItems = pendingBridgeRecords.map((record) => ({
+    key: `${record.txHash}-${record.direction}`,
+    txHash: record.txHash,
+    directionLabel:
+      record.direction === "l1-to-citrea"
+        ? "Ethereum → Citrea"
+        : "Citrea → Ethereum",
+    statusLabel: (record.status ?? "pending")
+      .replace(/_/g, " ")
+      .toLowerCase()
+      .replace(/^./, (char) => char.toUpperCase()),
+  }));
 
   const unitTokenValue = useMemo(
     () => formatTokenBalance(unitBalance, accountAddress),
@@ -546,6 +593,41 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
             ) : null}
 
             <div className="space-y-3">
+              {pendingBridgeItems.length ? (
+                <div className="space-y-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+                    Pending bridges
+                  </p>
+                  {pendingBridgeItems.map((item) => (
+                    <div
+                      key={item.key}
+                      className="rounded-2xl border border-border/60 bg-background/70 p-4 text-xs text-muted-foreground"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-foreground/80">
+                            {item.directionLabel}
+                          </p>
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            Status: {item.statusLabel}
+                          </p>
+                        </div>
+                        <span className="rounded-full border border-border/60 bg-background/70 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                          Pending
+                        </span>
+                      </div>
+                      <a
+                        href={`https://layerzeroscan.com/tx/${item.txHash}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-3 inline-flex text-[11px] font-semibold uppercase tracking-[0.22em] text-foreground/80 transition hover:text-foreground"
+                      >
+                        View on LayerZeroScan
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
                 Your positions
               </p>

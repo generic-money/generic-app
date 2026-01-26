@@ -54,6 +54,15 @@ import {
   getPredepositChainNickname,
 } from "@/lib/constants/predeposit";
 import type { StablecoinTicker } from "@/lib/constants/stablecoins";
+import {
+  fetchLzMessageStatus,
+  isFinalLzStatus,
+  type LzBridgeRecord,
+  loadLzBridgeRecords,
+  pruneLzBridgeRecords,
+  saveLzBridgeRecords,
+  upsertLzBridgeRecord,
+} from "@/lib/layerzero/scan";
 import { getStablecoins, gusd } from "@/lib/models/tokens";
 import { type HexAddress, ZERO_ADDRESS } from "@/lib/types/address";
 import { cn } from "@/lib/utils";
@@ -160,6 +169,9 @@ const CITREA_CHAIN_ID_NUMBER = 4114;
 const CITREA_BRIDGE_TYPE = 1;
 const CITREA_CHAIN_ID = BigInt(CITREA_CHAIN_ID_NUMBER);
 const L1_CHAIN_ID = BigInt(1);
+const LZ_EID_ETHEREUM = 30101;
+const LZ_EID_CITREA = 30403;
+const ENABLE_LZ_LOGS = process.env.NODE_ENV !== "production";
 const BRIDGE_COORDINATOR_L2_ADDRESS =
   "0x6E810122C2B7d474Ef568bdf221ec05f2dC8063A" as const satisfies HexAddress;
 const BRIDGE_COORDINATOR_L1_ADDRESS = getBridgeCoordinatorAddress(
@@ -445,6 +457,7 @@ export function DepositSwap() {
   const [autoSwitchRequested, setAutoSwitchRequested] = useState(false);
   const [stakePanelShifted, setStakePanelShifted] = useState(false);
   const [stakePanelVisible, setStakePanelVisible] = useState(false);
+  const [lzBridgeRecords, setLzBridgeRecords] = useState<LzBridgeRecord[]>([]);
 
   useEffect(() => {
     if (!stablecoins.find((coin) => coin.ticker === selectedTicker)) {
@@ -691,6 +704,37 @@ export function DepositSwap() {
     setStakeAmount(fromAmount);
   }, [bridgeStakeState, fromAmount, stakeAfterBridge, stakeAmountTouched]);
 
+  useEffect(() => {
+    const storedRecords = loadLzBridgeRecords();
+    setLzBridgeRecords(storedRecords);
+    if (ENABLE_LZ_LOGS) {
+      const pending = storedRecords.filter(
+        (record) => !isFinalLzStatus(record.status),
+      );
+      console.info("LZ storage: pending txs loaded", {
+        count: pending.length,
+        txHashes: pending.map((record) => record.txHash),
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    const pruned = pruneLzBridgeRecords(lzBridgeRecords);
+    if (pruned !== lzBridgeRecords) {
+      setLzBridgeRecords(pruned);
+      return;
+    }
+    saveLzBridgeRecords(pruned);
+  }, [lzBridgeRecords]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setLzBridgeRecords((current) => pruneLzBridgeRecords(current));
+    }, 60000);
+
+    return () => window.clearInterval(interval);
+  }, []);
+
   const fromBalanceText = formatBalanceText(
     fromBalanceHook,
     accountAddress,
@@ -893,6 +937,31 @@ export function DepositSwap() {
       hasCitreaGusdBalance ||
       bridgeStakeState !== "idle");
   const showStakeActionButton = Boolean(accountAddress && hasCitreaGusdBalance);
+  const pendingLzRecords = useMemo(() => {
+    if (!accountAddress) {
+      return [];
+    }
+
+    return lzBridgeRecords.filter(
+      (record) =>
+        record.account.toLowerCase() === accountAddress.toLowerCase() &&
+        !isFinalLzStatus(record.status),
+    );
+  }, [accountAddress, lzBridgeRecords]);
+  const pendingL1ToCitrea = pendingLzRecords.find(
+    (record) => record.direction === "l1-to-citrea",
+  );
+  const pendingCitreaToL1 = pendingLzRecords.find(
+    (record) => record.direction === "citrea-to-l1",
+  );
+  const pendingBridgeForRoute = isCitreaReturnFlow
+    ? pendingCitreaToL1
+    : isCitreaDeposit
+      ? pendingL1ToCitrea
+      : null;
+  const pendingBridgeStatusLabel = pendingBridgeForRoute?.status
+    ? pendingBridgeForRoute.status.replace(/_/g, " ").toLowerCase()
+    : "pending";
 
   useEffect(() => {
     let visibleTimeout: number | undefined;
@@ -931,6 +1000,82 @@ export function DepositSwap() {
 
     return () => window.clearInterval(interval);
   }, [bridgeStakeState, citreaGusdBalance]);
+
+  useEffect(() => {
+    if (!pendingLzRecords.length) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const pollStatuses = async () => {
+      const updates = await Promise.all(
+        pendingLzRecords.map(async (record) => {
+          try {
+            const status = await fetchLzMessageStatus(record.txHash, {
+              srcEid: record.srcEid,
+              dstEid: record.dstEid,
+            });
+            if (ENABLE_LZ_LOGS) {
+              console.info("LZ poll: status fetched", {
+                txHash: record.txHash,
+                status: status.statusName,
+                guid: status.guid,
+              });
+            }
+            return {
+              ...record,
+              status: status.statusName ?? record.status,
+              statusMessage: status.statusMessage ?? record.statusMessage,
+              guid: status.guid ?? record.guid,
+              updatedAt: Date.now(),
+            };
+          } catch {
+            if (ENABLE_LZ_LOGS) {
+              console.warn("LZ poll: status fetch failed", {
+                txHash: record.txHash,
+              });
+            }
+            return record;
+          }
+        }),
+      );
+
+      if (cancelled) {
+        return;
+      }
+
+      setLzBridgeRecords((current) => {
+        const updateMap = new Map(
+          updates.map((item) => [item.txHash.toLowerCase(), item]),
+        );
+
+        if (ENABLE_LZ_LOGS) {
+          current.forEach((record) => {
+            const updated = updateMap.get(record.txHash.toLowerCase());
+            if (updated?.status && updated.status !== record.status) {
+              console.info("LZ poll: status updated", {
+                txHash: record.txHash,
+                from: record.status ?? "unknown",
+                to: updated.status,
+              });
+            }
+          });
+        }
+
+        return current.map(
+          (record) => updateMap.get(record.txHash.toLowerCase()) ?? record,
+        );
+      });
+    };
+
+    pollStatuses();
+    const interval = window.setInterval(pollStatuses, 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [pendingLzRecords]);
 
   useEffect(() => {
     if (
@@ -1266,6 +1411,24 @@ export function DepositSwap() {
           ],
           value: nativeFee,
         });
+        if (ENABLE_LZ_LOGS) {
+          console.info("LZ track: L1→Citrea tx stored", {
+            txHash: depositHash,
+            account: accountAddress,
+            amount: parsedAmount.toString(),
+          });
+        }
+        setLzBridgeRecords((current) =>
+          upsertLzBridgeRecord(current, {
+            txHash: depositHash,
+            account: accountAddress as HexAddress,
+            direction: "l1-to-citrea",
+            srcEid: LZ_EID_ETHEREUM,
+            dstEid: LZ_EID_CITREA,
+            createdAt: Date.now(),
+            status: "SUBMITTED",
+          }),
+        );
         console.info("Deposit & bridge tx sent", {
           hash: depositHash,
           route: "citrea",
@@ -1456,6 +1619,24 @@ export function DepositSwap() {
         ],
         value: nativeFee,
       });
+      if (ENABLE_LZ_LOGS) {
+        console.info("LZ track: Citrea→L1 tx stored", {
+          txHash: bridgeHash,
+          account: accountAddress,
+          amount: parsedAmount.toString(),
+        });
+      }
+      setLzBridgeRecords((current) =>
+        upsertLzBridgeRecord(current, {
+          txHash: bridgeHash,
+          account: accountAddress as HexAddress,
+          direction: "citrea-to-l1",
+          srcEid: LZ_EID_CITREA,
+          dstEid: LZ_EID_ETHEREUM,
+          createdAt: Date.now(),
+          status: "SUBMITTED",
+        }),
+      );
       notifyTxSubmitted("Bridge", bridgeHash);
       await publicClient.waitForTransactionReceipt({ hash: bridgeHash });
       notifyTxConfirmed("Bridge", bridgeHash);
@@ -2028,6 +2209,13 @@ export function DepositSwap() {
                   {buttonState.label}
                 </button>
               )}
+              {pendingBridgeForRoute ? (
+                <p className="text-center text-xs text-muted-foreground">
+                  Bridge in progress ·{" "}
+                  {pendingBridgeStatusLabel.slice(0, 1).toUpperCase() +
+                    pendingBridgeStatusLabel.slice(1)}
+                </p>
+              ) : null}
               {!txError && insufficientBalance ? (
                 <p className="text-center text-xs text-destructive">
                   Amount exceeds available balance. Click your balance to use
@@ -2113,6 +2301,15 @@ export function DepositSwap() {
                 >
                   {stakeButtonState.label}
                 </button>
+              ) : null}
+              {pendingL1ToCitrea ? (
+                <p className="text-center text-xs text-muted-foreground">
+                  Bridge in progress ·{" "}
+                  {(pendingL1ToCitrea.status ?? "pending")
+                    .replace(/_/g, " ")
+                    .toLowerCase()
+                    .replace(/^./, (char) => char.toUpperCase())}
+                </p>
               ) : null}
               {!stakeError && stakeInsufficientBalance ? (
                 <p className="text-center text-xs text-destructive">

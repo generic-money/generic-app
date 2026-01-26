@@ -444,6 +444,11 @@ export function DepositSwap() {
   const [stakeAfterBridge, setStakeAfterBridge] = useState(false);
   const [stakeAmount, setStakeAmount] = useState("");
   const [stakeAmountTouched, setStakeAmountTouched] = useState(false);
+  const [stakeMode, setStakeMode] = useState<"stake" | "unstake">("stake");
+  const [unstakeAmount, setUnstakeAmount] = useState("");
+  const [unstakeStep, setUnstakeStep] = useState<"idle" | "submitting">(
+    "idle",
+  );
   const [pendingStakeAmount, setPendingStakeAmount] = useState<bigint | null>(
     null,
   );
@@ -451,6 +456,7 @@ export function DepositSwap() {
     "idle" | "bridging" | "waiting" | "ready" | "staking" | "complete" | "error"
   >("idle");
   const [stakeError, setStakeError] = useState<string | null>(null);
+  const [unstakeError, setUnstakeError] = useState<string | null>(null);
   const [citreaBalanceBaseline, setCitreaBalanceBaseline] = useState<
     bigint | null
   >(null);
@@ -682,9 +688,13 @@ export function DepositSwap() {
     if (depositRoute !== "citrea") {
       setStakeAfterBridge(false);
       setStakeAmountTouched(false);
+      setStakeMode("stake");
+      setUnstakeAmount("");
+      setUnstakeStep("idle");
       setBridgeStakeState("idle");
       setPendingStakeAmount(null);
       setStakeError(null);
+      setUnstakeError(null);
       setCitreaBalanceBaseline(null);
       setAutoSwitchRequested(false);
     }
@@ -693,6 +703,7 @@ export function DepositSwap() {
   useEffect(() => {
     if (
       !stakeAfterBridge ||
+      stakeMode !== "stake" ||
       stakeAmountTouched ||
       (bridgeStakeState !== "idle" && bridgeStakeState !== "complete")
     ) {
@@ -700,7 +711,13 @@ export function DepositSwap() {
     }
 
     setStakeAmount(fromAmount);
-  }, [bridgeStakeState, fromAmount, stakeAfterBridge, stakeAmountTouched]);
+  }, [
+    bridgeStakeState,
+    fromAmount,
+    stakeAfterBridge,
+    stakeAmountTouched,
+    stakeMode,
+  ]);
 
   useEffect(() => {
     const storedRecords = loadLzBridgeRecords();
@@ -762,12 +779,21 @@ export function DepositSwap() {
 
   const canUseStakeMax =
     Boolean(accountAddress) && Boolean(citreaGusdBalance.data?.formatted);
+  const canUseUnstakeMax =
+    Boolean(accountAddress) && Boolean(citreaVaultBalance.data?.formatted);
 
   const handleStakeMaxClick = () => {
     const value = citreaGusdBalance.data?.formatted;
     if (value) {
       setStakeAmount(value);
       setStakeAmountTouched(true);
+    }
+  };
+
+  const handleUnstakeMaxClick = () => {
+    const value = citreaVaultBalance.data?.formatted;
+    if (value) {
+      setUnstakeAmount(value);
     }
   };
 
@@ -889,12 +915,29 @@ export function DepositSwap() {
       return null;
     }
   }, [citreaGusdDecimals, stakeAmount]);
+  const unstakeParsedAmount = useMemo(() => {
+    if (!citreaVaultDecimals || unstakeAmount.trim() === "") {
+      return null;
+    }
+
+    try {
+      return parseUnits(unstakeAmount, citreaVaultDecimals);
+    } catch {
+      return null;
+    }
+  }, [citreaVaultDecimals, unstakeAmount]);
   const stakeTargetAmount = pendingStakeAmount ?? stakeParsedAmount;
   const stakeBalanceValue = citreaGusdBalance.data?.value;
+  const unstakeBalanceValue = citreaVaultBalance.data?.value;
   const stakeInsufficientBalance = Boolean(
     stakeTargetAmount &&
       stakeBalanceValue !== undefined &&
       stakeTargetAmount > stakeBalanceValue,
+  );
+  const unstakeInsufficientBalance = Boolean(
+    unstakeParsedAmount &&
+      unstakeBalanceValue !== undefined &&
+      unstakeParsedAmount > unstakeBalanceValue,
   );
   const needsStakeApproval = Boolean(
     stakeTargetAmount && stakeAllowance < stakeTargetAmount,
@@ -920,10 +963,33 @@ export function DepositSwap() {
           6,
         )
       : "—";
+  const unstakePreviewAmount = unstakeParsedAmount ?? ZERO_AMOUNT;
+  const unstakePreviewEnabled = Boolean(
+    unstakeParsedAmount && unstakeParsedAmount > ZERO_AMOUNT,
+  );
+  const { data: unstakePreviewGusd } = useReadContract({
+    address: CITREA_VAULT_ADDRESS,
+    abi: erc4626Abi,
+    chainId: CITREA_CHAIN_ID_NUMBER,
+    functionName: "previewRedeem",
+    args: [unstakePreviewAmount],
+    query: {
+      enabled: unstakePreviewEnabled,
+    },
+  });
+  const unstakePreviewText =
+    unstakePreviewGusd != null && citreaGusdDecimals != null
+      ? formatTokenAmount(formatUnits(unstakePreviewGusd, citreaGusdDecimals), 6)
+      : "—";
   const stakeBalanceText = formatTokenBalanceText(
     citreaGusdBalance,
     accountAddress,
     "GUSD",
+  );
+  const unstakeBalanceText = formatTokenBalanceText(
+    citreaVaultBalance,
+    accountAddress,
+    "sGUSD",
   );
   const stakePositionText = formatTokenBalanceText(
     citreaVaultBalance,
@@ -934,13 +1000,18 @@ export function DepositSwap() {
     (citreaVaultBalance.data?.value ?? ZERO_AMOUNT) > ZERO_AMOUNT;
   const hasCitreaGusdBalance =
     (citreaGusdBalance.data?.value ?? ZERO_AMOUNT) > ZERO_AMOUNT;
+  const isStakeMode = stakeMode === "stake";
+  const isUnstakeMode = stakeMode === "unstake";
   const showStakePanel =
     depositRoute === "citrea" &&
     (stakeAfterBridge ||
       hasCitreaStakePosition ||
       hasCitreaGusdBalance ||
       bridgeStakeState !== "idle");
-  const showStakeActionButton = Boolean(accountAddress && hasCitreaGusdBalance);
+  const showStakeActionButton = Boolean(
+    accountAddress &&
+      (isStakeMode ? hasCitreaGusdBalance : hasCitreaStakePosition),
+  );
   const pendingLzRecords = useMemo(() => {
     if (!accountAddress) {
       return [];
@@ -1289,11 +1360,70 @@ export function DepositSwap() {
     switchChainAsync,
   ]);
 
+  const unstakeButtonState = useMemo(() => {
+    if (!accountAddress) {
+      return { label: "Connect wallet", disabled: true };
+    }
+
+    if (unstakeStep === "submitting") {
+      return { label: "Unstaking…", disabled: true };
+    }
+
+    if (activeChainId !== CITREA_CHAIN_ID_NUMBER) {
+      return { label: "Switch to Citrea", disabled: !switchChainAsync };
+    }
+
+    if (!unstakeParsedAmount || unstakeParsedAmount <= ZERO_AMOUNT) {
+      return { label: "Enter amount", disabled: true };
+    }
+
+    if (unstakeInsufficientBalance) {
+      return { label: "Insufficient balance", disabled: true };
+    }
+
+    return { label: "Unstake", disabled: false };
+  }, [
+    accountAddress,
+    activeChainId,
+    switchChainAsync,
+    unstakeInsufficientBalance,
+    unstakeParsedAmount,
+    unstakeStep,
+  ]);
+
   const stakeInputDisabled =
-    bridgeStakeState === "bridging" ||
-    bridgeStakeState === "waiting" ||
-    bridgeStakeState === "ready" ||
-    bridgeStakeState === "staking";
+    isStakeMode &&
+    (bridgeStakeState === "bridging" ||
+      bridgeStakeState === "waiting" ||
+      bridgeStakeState === "ready" ||
+      bridgeStakeState === "staking");
+
+  const activeStakeButtonState = isStakeMode
+    ? stakeButtonState
+    : unstakeButtonState;
+  const stakePanelLabel = isStakeMode ? "Stake" : "Unstake";
+  const stakePanelPlaceholder = isStakeMode
+    ? "Amount in GUSD"
+    : "Amount in sGUSD";
+  const stakePanelValue = isStakeMode ? stakeAmount : unstakeAmount;
+  const stakePanelInputDisabled = isStakeMode
+    ? stakeInputDisabled
+    : unstakeStep === "submitting";
+  const stakePanelBalanceText = isStakeMode
+    ? stakeBalanceText
+    : unstakeBalanceText;
+  const stakePanelCanUseMax = isStakeMode
+    ? canUseStakeMax && !stakeInputDisabled
+    : canUseUnstakeMax;
+  const stakePanelOnMax = isStakeMode
+    ? handleStakeMaxClick
+    : handleUnstakeMaxClick;
+  const stakePanelPreviewLabel = isStakeMode
+    ? "Est. vault shares"
+    : "Est. GUSD";
+  const stakePanelPreviewValue = isStakeMode
+    ? stakePreviewText
+    : unstakePreviewText;
 
   const handleDeposit = async () => {
     if (
@@ -1984,6 +2114,76 @@ export function DepositSwap() {
     await handleStake(stakeTargetAmount);
   };
 
+  const handleUnstakeAction = async () => {
+    if (!accountAddress) {
+      return;
+    }
+
+    if (!publicClient) {
+      return;
+    }
+
+    if (activeChainId !== CITREA_CHAIN_ID_NUMBER) {
+      if (switchChainAsync) {
+        await switchChainAsync({ chainId: CITREA_CHAIN_ID_NUMBER });
+      }
+      return;
+    }
+
+    if (
+      !unstakeParsedAmount ||
+      unstakeParsedAmount <= ZERO_AMOUNT ||
+      unstakeInsufficientBalance
+    ) {
+      return;
+    }
+
+    setUnstakeError(null);
+    setUnstakeStep("submitting");
+
+    try {
+      console.info("Unstake redeem call", {
+        functionName: "redeem",
+        address: CITREA_VAULT_ADDRESS,
+        chainId: activeChainId,
+        args: [unstakeParsedAmount, accountAddress, accountAddress],
+      });
+      const redeemHash = await writeContractAsync({
+        abi: erc4626Abi,
+        address: CITREA_VAULT_ADDRESS,
+        chainId: activeChainId,
+        functionName: "redeem",
+        args: [unstakeParsedAmount, accountAddress, accountAddress],
+      });
+      notifyTxSubmitted("Unstake", redeemHash);
+      await publicClient.waitForTransactionReceipt({ hash: redeemHash });
+      notifyTxConfirmed("Unstake", redeemHash);
+
+      setUnstakeAmount("");
+      const refetches: Promise<unknown>[] = [];
+      if (citreaGusdBalance.refetch) {
+        refetches.push(citreaGusdBalance.refetch());
+      }
+      if (citreaVaultBalance.refetch) {
+        refetches.push(citreaVaultBalance.refetch());
+      }
+      if (refetches.length) {
+        await Promise.allSettled(refetches);
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unstaking failed";
+      setUnstakeError(message);
+      pushAlert({
+        type: "error",
+        title: "Unstaking failed",
+        message,
+      });
+    } finally {
+      setUnstakeStep("idle");
+    }
+  };
+
   const depositFromChainLabel = "Ethereum";
   const depositToChainLabel =
     depositRoute === "citrea"
@@ -1999,7 +2199,10 @@ export function DepositSwap() {
       : "Ethereum";
   const toChainLabel = isDepositFlow ? depositToChainLabel : "Ethereum";
 
-  const renderAssetSelector = (assetType: AssetType) => {
+  const renderAssetSelector = (
+    assetType: AssetType,
+    labelOverride?: string,
+  ) => {
     if (assetType === "stablecoin") {
       return (
         <Select value={selectedTicker} onValueChange={handleStablecoinChange}>
@@ -2035,7 +2238,7 @@ export function DepositSwap() {
     return (
       <div className="flex h-11 items-center gap-2 rounded-xl border border-border/70 bg-background/80 px-3 text-sm font-medium text-foreground">
         <TokenIcon src={gusd.iconUrl} alt="GUSD icon" />
-        <span>GUSD</span>
+        <span>{labelOverride ?? "GUSD"}</span>
       </div>
     );
   };
@@ -2242,7 +2445,7 @@ export function DepositSwap() {
               )}
               aria-hidden={!stakePanelVisible}
             >
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted-foreground">
@@ -2252,41 +2455,75 @@ export function DepositSwap() {
                       Deposit Citrea GUSD into the vault to earn yield.
                     </p>
                   </div>
-                  <span className="rounded-full border border-border/60 bg-background/80 px-2.5 py-1 text-[11px] font-semibold text-foreground/80">
-                    APY —
-                  </span>
+                  <div className="flex flex-col items-end gap-2">
+                    <span className="rounded-full border border-border/60 bg-background/80 px-2.5 py-1 text-[11px] font-semibold text-foreground/80">
+                      APY —
+                    </span>
+                    <div className="inline-flex rounded-full border border-border/60 bg-background/80 p-1 text-[11px] font-semibold">
+                      <button
+                        type="button"
+                        onClick={() => setStakeMode("stake")}
+                        aria-pressed={isStakeMode}
+                        className={cn(
+                          "rounded-full px-3 py-1 transition",
+                          isStakeMode
+                            ? "bg-primary text-primary-foreground"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        Stake
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setStakeMode("unstake")}
+                        aria-pressed={isUnstakeMode}
+                        className={cn(
+                          "rounded-full px-3 py-1 transition",
+                          isUnstakeMode
+                            ? "bg-primary text-primary-foreground"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        Unstake
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
               <SwapAssetPanel
-                label="Stake"
+                label={stakePanelLabel}
                 chainLabel="Citrea"
-                selector={renderAssetSelector("gusd")}
+                selector={renderAssetSelector(
+                  "gusd",
+                  isStakeMode ? "GUSD" : "sGUSD",
+                )}
                 inputProps={{
-                  placeholder: "Amount in GUSD",
+                  placeholder: stakePanelPlaceholder,
                   autoComplete: "off",
-                  value: stakeAmount,
-                  disabled: stakeInputDisabled,
+                  value: stakePanelValue,
+                  disabled: stakePanelInputDisabled,
                   onChange: (event) => {
-                    setStakeAmount(event.target.value);
-                    setStakeAmountTouched(true);
+                    if (isStakeMode) {
+                      setStakeAmount(event.target.value);
+                      setStakeAmountTouched(true);
+                    } else {
+                      setUnstakeAmount(event.target.value);
+                    }
                   },
                 }}
                 balance={{
-                  text: stakeBalanceText,
-                  interactive: canUseStakeMax && !stakeInputDisabled,
-                  onClick:
-                    canUseStakeMax && !stakeInputDisabled
-                      ? handleStakeMaxClick
-                      : undefined,
+                  text: stakePanelBalanceText,
+                  interactive: stakePanelCanUseMax,
+                  onClick: stakePanelCanUseMax ? stakePanelOnMax : undefined,
                 }}
               />
               <div className="rounded-2xl border border-border/60 bg-background/70 p-4 text-xs">
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">
-                    Est. vault shares
+                    {stakePanelPreviewLabel}
                   </span>
                   <span className="font-semibold text-foreground">
-                    {stakePreviewText}
+                    {stakePanelPreviewValue}
                   </span>
                 </div>
                 <div className="mt-2 flex items-center justify-between">
@@ -2299,11 +2536,11 @@ export function DepositSwap() {
               {showStakeActionButton ? (
                 <button
                   type="button"
-                  onClick={handleStakeAction}
-                  disabled={stakeButtonState.disabled}
+                  onClick={isStakeMode ? handleStakeAction : handleUnstakeAction}
+                  disabled={activeStakeButtonState.disabled}
                   className="h-11 rounded-xl bg-gradient-to-r from-primary via-primary/90 to-primary/95 text-sm font-semibold text-primary-foreground transition hover:from-primary/90 hover:via-primary/80 hover:to-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {stakeButtonState.label}
+                  {activeStakeButtonState.label}
                 </button>
               ) : null}
               {pendingL1ToCitrea ? (
@@ -2315,14 +2552,24 @@ export function DepositSwap() {
                     .replace(/^./, (char) => char.toUpperCase())}
                 </p>
               ) : null}
-              {!stakeError && stakeInsufficientBalance ? (
+              {!stakeError && isStakeMode && stakeInsufficientBalance ? (
                 <p className="text-center text-xs text-destructive">
                   Stake amount exceeds your Citrea balance.
                 </p>
               ) : null}
-              {stakeError ? (
+              {isUnstakeMode && unstakeInsufficientBalance ? (
+                <p className="text-center text-xs text-destructive">
+                  Unstake amount exceeds your sGUSD balance.
+                </p>
+              ) : null}
+              {isStakeMode && stakeError ? (
                 <p className="text-center text-xs text-destructive">
                   {stakeError}
+                </p>
+              ) : null}
+              {isUnstakeMode && unstakeError ? (
+                <p className="text-center text-xs text-destructive">
+                  {unstakeError}
                 </p>
               ) : null}
             </div>

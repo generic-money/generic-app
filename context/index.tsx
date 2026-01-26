@@ -181,6 +181,11 @@ export default function ContextProvider({
       return "deposit";
     }
 
+    const storedRoute = window.localStorage.getItem(OPPORTUNITY_STORAGE_KEY);
+    if (storedRoute === "citrea" || storedRoute === "predeposit") {
+      return "deposit";
+    }
+
     const storedFlow = window.localStorage.getItem(SWAP_FLOW_STORAGE_KEY);
     if (storedFlow === "deposit" || storedFlow === "redeem") {
       return storedFlow;

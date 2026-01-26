@@ -16,7 +16,7 @@ export async function GET(
   const tx = resolvedParams?.tx || fallbackTx;
   if (!tx) {
     return NextResponse.json(
-      { error: "Invalid transaction hash", tx: params.tx ?? "" },
+      { error: "Invalid transaction hash", tx: resolvedParams?.tx ?? "" },
       { status: 400 },
     );
   }

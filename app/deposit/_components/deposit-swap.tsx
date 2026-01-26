@@ -3,7 +3,7 @@
 import { ArrowUpDown } from "lucide-react";
 import Image from "next/image";
 import { type CSSProperties, useEffect, useMemo, useState } from "react";
-import { erc20Abi, erc4626Abi } from "viem";
+import { erc20Abi, erc4626Abi, type PublicClient } from "viem";
 import {
   useAccount,
   useBalance,
@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/select";
 import { useOpportunityRoute } from "@/context";
 import { pushAlert } from "@/lib/alerts";
-import { getChainNameById } from "@/lib/constants/chains";
+import { CHAINS, getChainNameById } from "@/lib/constants/chains";
 import {
   getGenericDepositorAddress,
   getGenericUnitTokenAddress,
@@ -36,7 +36,10 @@ import {
   OPPORTUNITY_THEME,
   type OpportunityRoute,
 } from "@/lib/constants/opportunity-theme";
-import { getPredepositChainNickname } from "@/lib/constants/predeposit";
+import {
+  getBridgeCoordinatorAddress,
+  getPredepositChainNickname,
+} from "@/lib/constants/predeposit";
 import type { StablecoinTicker } from "@/lib/constants/stablecoins";
 import { getStablecoins, gusd } from "@/lib/models/tokens";
 import type { HexAddress } from "@/lib/types/address";
@@ -108,6 +111,13 @@ type AssetType = "stablecoin" | "gusd";
 const ZERO_AMOUNT = BigInt(0);
 type HexBytes = `0x${string}`;
 type HexData = `0x${string}`;
+type BridgeMessage = {
+  sender: HexBytes;
+  recipient: HexBytes;
+  sourceWhitelabel: HexBytes;
+  destinationWhitelabel: HexBytes;
+  amount: bigint;
+};
 
 const MAINNET_CHAIN_ID = 1;
 const CITREA_CHAIN_ID_NUMBER = 4114;
@@ -116,6 +126,11 @@ const CITREA_CHAIN_ID = BigInt(CITREA_CHAIN_ID_NUMBER);
 const L1_CHAIN_ID = BigInt(1);
 const BRIDGE_COORDINATOR_L2_ADDRESS =
   "0x6E810122C2B7d474Ef568bdf221ec05f2dC8063A" as const satisfies HexAddress;
+const BRIDGE_COORDINATOR_L1_ADDRESS = getBridgeCoordinatorAddress(
+  CHAINS.MAINNET,
+);
+const LZ_ADAPTER_L1_ADDRESS =
+  "0x05a166797e784d49Ba880b289647eCcB29B0144e" as const satisfies HexAddress;
 const LZ_ADAPTER_L2_ADDRESS =
   "0xf056d4F903E53432873bFD0DA32f9d6fCb92825c" as const satisfies HexAddress;
 const CITREA_WHITELABEL_ADDRESS =
@@ -123,14 +138,46 @@ const CITREA_WHITELABEL_ADDRESS =
 const CITREA_WHITELABEL =
   "0x000000000000000000000000ac8c1aeb584765db16ac3e08d4736cfce198589b" as const satisfies HexBytes;
 const CITREA_BRIDGE_PARAMS = "0x" as const satisfies HexData;
-// TODO: replace with LayerZero fee quote when helper is available.
-const ESTIMATED_LZ_MESSAGE_FEE_WEI = BigInt("23078868536475");
 
 const toBytes32 = (value: HexBytes) =>
   `0x${value.slice(2).padStart(64, "0")}` as const;
 
 const formatTxHash = (hash: HexBytes) =>
   `${hash.slice(0, 6)}...${hash.slice(-4)}`;
+
+const estimateLzBridgeFee = async ({
+  client,
+  bridgeCoordinatorAddress,
+  adapterAddress,
+  destinationChainId,
+  bridgeParams,
+  message,
+}: {
+  client: PublicClient | null | undefined;
+  bridgeCoordinatorAddress: HexAddress;
+  adapterAddress: HexAddress;
+  destinationChainId: bigint;
+  bridgeParams: HexData;
+  message: BridgeMessage;
+}) => {
+  if (!client) {
+    return null;
+  }
+
+  const encodedMessage = await client.readContract({
+    abi: bridgeCoordinatorL2Abi,
+    address: bridgeCoordinatorAddress,
+    functionName: "encodeBridgeMessage",
+    args: [message],
+  });
+
+  return client.readContract({
+    abi: layerZeroAdapterAbi,
+    address: adapterAddress,
+    functionName: "estimateBridgeFee",
+    args: [destinationChainId, encodedMessage, bridgeParams],
+  });
+};
 
 const notifyTxSubmitted = (label: string, hash: HexBytes) => {
   pushAlert({
@@ -285,6 +332,7 @@ export function DepositSwap() {
   const chainName = getChainNameById(activeChainId);
   const stablecoins = useMemo(() => getStablecoins(chainName), [chainName]);
   const publicClient = usePublicClient({ chainId: activeChainId });
+  const mainnetClient = usePublicClient({ chainId: MAINNET_CHAIN_ID });
   const { writeContractAsync } = useWriteContract();
   const { switchChainAsync } = useSwitchChain();
   const { data: blockNumber } = useBlockNumber({
@@ -701,10 +749,36 @@ export function DepositSwap() {
       setTxStep("submitting");
       let depositHash: HexBytes;
       if (isCitreaDeposit) {
-        if (!stablecoinAddress) {
+        if (
+          !stablecoinAddress ||
+          !l1GusdAddress ||
+          !mainnetClient ||
+          !BRIDGE_COORDINATOR_L1_ADDRESS
+        ) {
           return;
         }
         const remoteRecipient = toBytes32(accountAddress);
+        const sender = toBytes32(accountAddress);
+        const sourceWhitelabel = toBytes32(l1GusdAddress as HexBytes);
+        const destinationWhitelabel = CITREA_WHITELABEL;
+        const nativeFee = await estimateLzBridgeFee({
+          client: mainnetClient,
+          bridgeCoordinatorAddress: BRIDGE_COORDINATOR_L1_ADDRESS,
+          adapterAddress: LZ_ADAPTER_L1_ADDRESS,
+          destinationChainId: CITREA_CHAIN_ID,
+          bridgeParams: CITREA_BRIDGE_PARAMS,
+          message: {
+            sender,
+            recipient: remoteRecipient,
+            sourceWhitelabel,
+            destinationWhitelabel,
+            amount: parsedAmount,
+          },
+        });
+
+        if (nativeFee == null) {
+          return;
+        }
 
         console.info("Deposit & bridge call", {
           functionName: "depositAndBridge",
@@ -720,7 +794,7 @@ export function DepositSwap() {
             CITREA_WHITELABEL,
             CITREA_BRIDGE_PARAMS,
           ],
-          value: ESTIMATED_LZ_MESSAGE_FEE_WEI,
+          value: nativeFee,
         });
         depositHash = await writeContractAsync({
           abi: depositorAbi,
@@ -736,7 +810,7 @@ export function DepositSwap() {
             CITREA_WHITELABEL,
             CITREA_BRIDGE_PARAMS,
           ],
-          value: ESTIMATED_LZ_MESSAGE_FEE_WEI,
+          value: nativeFee,
         });
         console.info("Deposit & bridge tx sent", {
           hash: depositHash,
@@ -864,27 +938,24 @@ export function DepositSwap() {
       const sender = toBytes32(accountAddress);
       const remoteRecipient = toBytes32(accountAddress);
       const destinationWhitelabel = toBytes32(l1GusdAddress as HexBytes);
-      const message = await publicClient.readContract({
-        abi: bridgeCoordinatorL2Abi,
-        address: BRIDGE_COORDINATOR_L2_ADDRESS,
-        functionName: "encodeBridgeMessage",
-        args: [
-          {
-            sender,
-            recipient: remoteRecipient,
-            sourceWhitelabel: CITREA_WHITELABEL,
-            destinationWhitelabel,
-            amount: parsedAmount,
-          },
-        ],
+      const nativeFee = await estimateLzBridgeFee({
+        client: publicClient,
+        bridgeCoordinatorAddress: BRIDGE_COORDINATOR_L2_ADDRESS,
+        adapterAddress: LZ_ADAPTER_L2_ADDRESS,
+        destinationChainId: L1_CHAIN_ID,
+        bridgeParams: CITREA_BRIDGE_PARAMS,
+        message: {
+          sender,
+          recipient: remoteRecipient,
+          sourceWhitelabel: CITREA_WHITELABEL,
+          destinationWhitelabel,
+          amount: parsedAmount,
+        },
       });
 
-      const nativeFee = await publicClient.readContract({
-        abi: layerZeroAdapterAbi,
-        address: LZ_ADAPTER_L2_ADDRESS,
-        functionName: "estimateBridgeFee",
-        args: [L1_CHAIN_ID, message, CITREA_BRIDGE_PARAMS],
-      });
+      if (nativeFee == null) {
+        return;
+      }
 
       console.info("Bridge back call", {
         functionName: "bridge",

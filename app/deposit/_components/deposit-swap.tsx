@@ -3,13 +3,14 @@
 import { ArrowUpDown } from "lucide-react";
 import Image from "next/image";
 import { type CSSProperties, useEffect, useMemo, useState } from "react";
-import { erc20Abi, erc4626Abi, type PublicClient } from "viem";
+import { erc20Abi, erc4626Abi, formatUnits, type PublicClient } from "viem";
 import {
   useAccount,
   useBalance,
   useBlockNumber,
   useChainId,
   usePublicClient,
+  useReadContract,
   useSwitchChain,
   useWriteContract,
 } from "wagmi";
@@ -42,7 +43,7 @@ import {
 } from "@/lib/constants/predeposit";
 import type { StablecoinTicker } from "@/lib/constants/stablecoins";
 import { getStablecoins, gusd } from "@/lib/models/tokens";
-import type { HexAddress } from "@/lib/types/address";
+import { type HexAddress, ZERO_ADDRESS } from "@/lib/types/address";
 import { cn } from "@/lib/utils";
 import { useErc20Decimals } from "./hooks/useErc20Decimals";
 import { useErc4626Preview } from "./hooks/useErc4626Preview";
@@ -104,6 +105,20 @@ const layerZeroAdapterAbi = [
       { name: "bridgeParams", type: "bytes" },
     ],
     outputs: [{ name: "nativeFee", type: "uint256" }],
+  },
+] as const;
+
+const bridgeCoordinatorPredepositAbi = [
+  {
+    type: "function",
+    name: "getPredeposit",
+    stateMutability: "view",
+    inputs: [
+      { name: "chainNickname", type: "bytes32" },
+      { name: "sender", type: "address" },
+      { name: "remoteRecipient", type: "bytes32" },
+    ],
+    outputs: [{ name: "amount", type: "uint256" }],
   },
 ] as const;
 
@@ -442,9 +457,38 @@ export function DepositSwap() {
 
   const depositorAddress = getGenericDepositorAddress(chainName);
   const genericUnitTokenAddress = getGenericUnitTokenAddress(chainName);
+  const statusPredepositChainNickname =
+    getPredepositChainNickname("predeposit");
   const predepositChainNickname = isPredepositDeposit
-    ? getPredepositChainNickname("predeposit")
+    ? statusPredepositChainNickname
     : undefined;
+  const predepositSender = accountAddress ?? ZERO_ADDRESS;
+  const predepositRecipient = accountAddress
+    ? toBytes32(accountAddress)
+    : toBytes32(ZERO_ADDRESS);
+  const predepositEnabled = Boolean(
+    accountAddress && depositRoute === "predeposit",
+  );
+
+  const {
+    data: statusPredepositAmount,
+    isLoading: isStatusPredepositLoading,
+    isError: isStatusPredepositError,
+    refetch: refetchStatusPredeposit,
+  } = useReadContract({
+    address: BRIDGE_COORDINATOR_L1_ADDRESS,
+    abi: bridgeCoordinatorPredepositAbi,
+    chainId: MAINNET_CHAIN_ID,
+    functionName: "getPredeposit",
+    args: [
+      statusPredepositChainNickname,
+      predepositSender,
+      predepositRecipient,
+    ] as const,
+    query: {
+      enabled: predepositEnabled,
+    },
+  });
 
   const stablecoinBalance = useBalance({
     address: accountAddress,
@@ -475,6 +519,33 @@ export function DepositSwap() {
     },
   });
 
+  const statusPredepositBalance = useMemo(() => {
+    if (isStatusPredepositLoading) {
+      return { isLoading: true, isError: false };
+    }
+
+    if (
+      isStatusPredepositError ||
+      statusPredepositAmount == null ||
+      gusdDecimals == null
+    ) {
+      return { isLoading: false, isError: true };
+    }
+
+    return {
+      isLoading: false,
+      isError: false,
+      data: {
+        formatted: formatUnits(statusPredepositAmount, gusdDecimals),
+      },
+    };
+  }, [
+    gusdDecimals,
+    isStatusPredepositError,
+    isStatusPredepositLoading,
+    statusPredepositAmount,
+  ]);
+
   const fromAssetType: AssetType = isDepositFlow ? "stablecoin" : "gusd";
 
   const toAssetType: AssetType = isDepositFlow
@@ -484,13 +555,19 @@ export function DepositSwap() {
       : "stablecoin";
 
   const fromBalanceHook =
-    fromAssetType === "stablecoin" ? stablecoinBalance : gusdBalance;
+    fromAssetType === "stablecoin"
+      ? stablecoinBalance
+      : depositRoute === "predeposit"
+        ? statusPredepositBalance
+        : gusdBalance;
   const toBalanceHook =
     toAssetType === "stablecoin"
       ? stablecoinBalance
-      : isCitreaReturnFlow
-        ? gusdMainnetBalance
-        : gusdBalance;
+      : depositRoute === "predeposit"
+        ? statusPredepositBalance
+        : isCitreaReturnFlow
+          ? gusdMainnetBalance
+          : gusdBalance;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset amount when the active asset changes
   useEffect(() => {
@@ -507,6 +584,13 @@ export function DepositSwap() {
     accountAddress,
     toAssetType === "gusd" ? { fixedDecimals: 2 } : undefined,
   );
+  const isStatusDeposit = isDepositFlow && depositRoute === "predeposit";
+  const statusPredepositBalanceText = isStatusDeposit
+    ? formatBalanceText(statusPredepositBalance, accountAddress, {
+        fixedDecimals: 2,
+      }).replace(/^Balance:/, "Predeposited:")
+    : null;
+  const finalToBalanceText = statusPredepositBalanceText ?? toBalanceText;
   const canUseMax =
     Boolean(accountAddress) && Boolean(fromBalanceHook.data?.formatted);
 
@@ -880,6 +964,9 @@ export function DepositSwap() {
       }
       if (gusdBalance.refetch) {
         balanceRefetches.push(gusdBalance.refetch());
+      }
+      if (isPredepositDeposit && refetchStatusPredeposit) {
+        balanceRefetches.push(refetchStatusPredeposit());
       }
       if (balanceRefetches.length) {
         await Promise.allSettled(balanceRefetches);
@@ -1343,7 +1430,7 @@ export function DepositSwap() {
                   value: estimatedToAmount,
                 }}
                 balance={{
-                  text: toBalanceText,
+                  text: finalToBalanceText,
                 }}
               />
             </div>

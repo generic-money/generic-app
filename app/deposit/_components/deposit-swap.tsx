@@ -604,6 +604,12 @@ export function DepositSwap() {
     : isCitreaReturnFlow
       ? needsCitreaApproval
       : needsRedeemApproval;
+  const fromBalanceValue = fromBalanceHook.data?.value;
+  const insufficientBalance = Boolean(
+    parsedAmount &&
+      fromBalanceValue !== undefined &&
+      parsedAmount > fromBalanceValue,
+  );
 
   const depositActionLabel =
     depositRoute === "predeposit" ? "Predeposit" : "Mint";
@@ -668,6 +674,10 @@ export function DepositSwap() {
       return { label: "Enter amount", disabled: true };
     }
 
+    if (insufficientBalance) {
+      return { label: "Insufficient balance", disabled: true };
+    }
+
     if (txStep === "approving") {
       return { label: "Approving…", disabled: true };
     }
@@ -700,6 +710,7 @@ export function DepositSwap() {
     switchChainAsync,
     txStep,
     vaultAddress,
+    insufficientBalance,
   ]);
 
   const handleDeposit = async () => {
@@ -1177,6 +1188,10 @@ export function DepositSwap() {
       return;
     }
 
+    if (insufficientBalance) {
+      return;
+    }
+
     if (isDepositFlow) {
       await handleDeposit();
       return;
@@ -1364,6 +1379,12 @@ export function DepositSwap() {
                 {buttonState.label}
               </button>
             )}
+            {!txError && insufficientBalance ? (
+              <p className="text-center text-xs text-destructive">
+                Amount exceeds available balance. Click your balance to use the
+                max.
+              </p>
+            ) : null}
             {txError ? (
               <p className="text-center text-xs text-destructive">{txError}</p>
             ) : null}

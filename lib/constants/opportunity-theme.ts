@@ -43,13 +43,11 @@ export const getOpportunityHref = (route: OpportunityRoute) => {
     return "https://hub.status.network/pre-deposits";
   }
 
-  const path = route === "citrea" ? "/citrea" : null;
-
-  if (!path) {
-    return null;
+  if (route === "citrea") {
+    return "https://citrea.xyz/ecosystem";
   }
 
-  return base ? `${base}${path}` : path;
+  return null;
 };
 
 export const DEFAULT_OPPORTUNITY_ROUTE: OpportunityRoute = "predeposit";

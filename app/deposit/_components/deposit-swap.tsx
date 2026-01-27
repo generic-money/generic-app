@@ -301,6 +301,7 @@ type OpportunityOption = {
   title: string;
   description: string;
   note: string;
+  badge?: string;
   formDescription: string;
   iconSrc?: string;
   iconAlt?: string;
@@ -310,8 +311,8 @@ const OPPORTUNITY_OPTIONS: OpportunityOption[] = [
   {
     value: "citrea",
     eyebrow: "Citrea GUSD",
-    title: "Join the OGs with Citrea",
-    description: "Citrea-native GUSD for DeFi power users",
+    title: "Bitcoin's first zk Rollup",
+    description: "Access the BTC DeFi layer",
     note: "L2-native settlement",
     formDescription: "Mint Citrea-native GUSD with stablecoins",
     iconSrc: "/chains/citrea.png",
@@ -320,10 +321,11 @@ const OPPORTUNITY_OPTIONS: OpportunityOption[] = [
   {
     value: "predeposit",
     eyebrow: "Status L2 GUSD",
-    title: "Predeposit for Status L2",
-    description: "Lock funds for Status L2 launch with zero penalties",
+    title: "The gasless network",
+    description: "Be early with the predeposit vaults",
+    badge: `Up to ${OPPORTUNITY_APY_CAP.predeposit} APY`,
     note: "Unlocks at launch",
-    formDescription: "Lock stablecoins now to mint once Status L2 goes live",
+    formDescription: "Start earning rewards before the network goes live",
     iconSrc: "/chains/status.png",
     iconAlt: "Status",
   },
@@ -352,11 +354,6 @@ const OpportunityCard = ({
   const style = {
     "--opportunity-color": optionTone.primary,
   } as CSSProperties;
-  const apyLabel =
-    option.value === "citrea"
-      ? `Projected APY · ${OPPORTUNITY_APY_CAP.citrea}`
-      : `Up to ${OPPORTUNITY_APY_CAP[option.value]} APY`;
-
   return (
     <label
       style={style}
@@ -393,10 +390,12 @@ const OpportunityCard = ({
             {option.description}
           </p>
         </div>
-        <div className="mt-auto flex items-center justify-between text-[11px] font-semibold text-foreground/70">
-          <span className="whitespace-nowrap rounded-full border border-border/60 bg-background/70 px-2.5 py-0.5">
-            {apyLabel}
-          </span>
+        <div className="mt-auto flex items-center justify-between gap-3 text-[11px] font-semibold text-foreground/70">
+          {option.badge ? (
+            <span className="whitespace-nowrap rounded-full border border-border/60 bg-background/70 px-2.5 py-0.5">
+              {option.badge}
+            </span>
+          ) : null}
           <span className="whitespace-nowrap text-muted-foreground">
             {option.note}
           </span>
@@ -2261,10 +2260,10 @@ export function DepositSwap() {
             Generic Money
           </span>
           <h1 className="text-3xl font-bold tracking-tight md:text-4xl">
-            One GUSD, many routes
+            Fungible Onchain Native Dollar
           </h1>
           <p className="mx-auto max-w-2xl text-sm text-muted-foreground md:text-base">
-            Choose the opportunity that matches your DeFi strategy
+            Fully onchain, liquid, yield-generating, (soon) private
           </p>
         </div>
         <fieldset className="mt-2 space-y-4 md:mt-20">

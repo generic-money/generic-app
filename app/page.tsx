@@ -15,13 +15,13 @@ import { DepositSwap } from "./deposit/_components/deposit-swap";
 
 const TRUST_ITEMS = [
   {
-    title: "Audit by Cantina",
+    title: "Audit by Spearbit",
     description: "Read the report",
     href: "https://docs.generic.money/audits/2026-01-19-report-cantinacode-generic-money.pdf",
     icon: ShieldCheck,
   },
   {
-    title: "Risk by Steakhouse",
+    title: "Risk Curation by Steakhouse Financial",
     description: "DeFi-native risk management",
     href: "https://www.steakhouse.financial/",
     icon: BadgeCheck,
@@ -86,26 +86,16 @@ export default function HomePage() {
                   Returns scale with bridged yield and total Citrea staking.
                 </p>
                 <div className="mt-auto space-y-3">
-                  <div className="grid gap-3">
-                    <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5">
-                      <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground">
-                        Projected APY
+                  <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5 text-xs text-muted-foreground">
+                    <div className="space-y-2">
+                      <p>
+                        APY model: Generic’s Citrea bridge yield and total GUSD
+                        staked on Citrea.
                       </p>
-                      <p className="mt-1 text-lg font-bold text-foreground">
-                        Targeting XX%
+                      <p>
+                        Yield is bridged to Citrea and split between the
+                        network and sGUSD stakers.
                       </p>
-                    </div>
-                    <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5 text-xs text-muted-foreground">
-                      <div className="space-y-2">
-                        <p>
-                          APY model: Generic’s Citrea bridge yield and total
-                          GUSD staked on Citrea.
-                        </p>
-                        <p>
-                          Yield is bridged to Citrea and split between the
-                          network and sGUSD stakers.
-                        </p>
-                      </div>
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-4">
@@ -151,29 +141,19 @@ export default function HomePage() {
                   unlock at launch — no penalties
                 </p>
                 <div className="mt-auto space-y-3">
-                  <div className="grid gap-3">
-                    <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5">
-                      <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground">
-                        Up to
+                  <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5 text-xs text-muted-foreground">
+                    <div className="space-y-2">
+                      <p>
+                        15M SNT and 20M LINEA liquid rewards are available for
+                        pre-depositors across Status vaults, including GUSD and
+                        other Status portfolio vaults.
                       </p>
-                      <p className="mt-1 text-lg font-bold text-foreground">
-                        {OPPORTUNITY_APY_CAP.predeposit} APY
+                      <p>
+                        Allocation of liquid incentives and Karma reflects
+                        vault TVL, time in vaults, and potential testnet v1/v2
+                        activity multipliers. APY varies with overall
+                        participation and Generic refreshes it daily.
                       </p>
-                    </div>
-                    <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5 text-xs text-muted-foreground">
-                      <div className="space-y-2">
-                        <p>
-                          15M SNT and 20M LINEA liquid rewards are available for
-                          pre-depositors across Status vaults, including GUSD
-                          and other Status portfolio vaults.
-                        </p>
-                        <p>
-                          Allocation of liquid incentives and Karma reflects
-                          vault TVL, time in vaults, and potential testnet v1/v2
-                          activity multipliers. APY varies with overall
-                          participation and Generic refreshes it daily.
-                        </p>
-                      </div>
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-4">

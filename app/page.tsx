@@ -9,6 +9,13 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
+import {
+  CitreaStakedValue,
+  CitreaTvlValue,
+} from "@/components/protocol/citrea-tvl-values";
+import { MainnetCollateralBreakdown } from "@/components/protocol/mainnet-collateral-breakdown";
+import { MainnetTvlValue } from "@/components/protocol/mainnet-tvl-value";
+import { StatusTvlValue } from "@/components/protocol/status-tvl-value";
 import { OPPORTUNITY_APY_CAP } from "@/lib/constants/opportunity-theme";
 import { DepositSidebar } from "./deposit/_components/deposit-sidebar";
 import { DepositSwap } from "./deposit/_components/deposit-swap";
@@ -64,174 +71,112 @@ export default function HomePage() {
               ecosystems.
             </p>
           </header>
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 lg:grid-cols-3">
             <div
-              className="group relative min-h-[240px] overflow-hidden rounded-2xl border border-border/60 bg-background/95 p-6 shadow-[0_20px_40px_-35px_rgba(15,23,42,0.35)] transition duration-300 hover:-translate-y-1 hover:shadow-[0_25px_55px_-35px_rgba(15,23,42,0.45)] motion-reduce:transform-none motion-reduce:transition-none animate-in fade-in-0 slide-in-from-bottom-4 duration-700"
+              className="group relative min-h-[240px] overflow-hidden rounded-2xl border border-border/60 bg-background/95 p-6 shadow-[0_20px_40px_-35px_rgba(15,23,42,0.35)] transition duration-300 hover:-translate-y-1 hover:shadow-[0_25px_55px_-35px_rgba(15,23,42,0.45)] motion-reduce:transform-none motion-reduce:transition-none animate-in fade-in-0 slide-in-from-bottom-4 duration-700 lg:order-2"
               style={{ animationDelay: "40ms" }}
             >
               <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_120%_at_100%_0%,hsl(var(--accent)/0.35)_0%,transparent_60%)] opacity-90" />
               <div className="relative flex h-full flex-col gap-4">
                 <div className="flex items-start justify-between gap-4">
-                  <div className="space-y-2">
+                  <div className="space-y-1">
                     <h3 className="text-lg font-semibold">
                       sGUSD vault on Citrea
                     </h3>
+                    <p className="text-xs text-muted-foreground">
+                      Staking vault on Citrea.
+                    </p>
                   </div>
                   <span className="flex h-10 w-10 items-center justify-center rounded-full border border-border/60 bg-background/80 text-primary shadow-sm">
                     <Layers className="h-5 w-5" />
                   </span>
                 </div>
-                <p className="text-sm text-muted-foreground">
-                  Stake Citrea GUSD to mint sGUSD and share in Citrea yield.
-                  Returns scale with bridged yield and total Citrea staking.
-                </p>
                 <div className="mt-auto space-y-3">
-                  <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5 text-xs text-muted-foreground">
-                    <div className="space-y-2">
-                      <p>
-                        APY model: Generic’s Citrea bridge yield and total GUSD
-                        staked on Citrea.
+                  <div className="grid gap-3">
+                    <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5">
+                      <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground">
+                        TVL
                       </p>
-                      <p>
-                        Yield is bridged to Citrea and split between the
-                        network and sGUSD stakers.
-                      </p>
+                    <p className="mt-1 text-lg font-bold text-foreground">
+                        <CitreaTvlValue />
+                    </p>
                     </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-4">
-                    <a
-                      href="https://x.com/genericmoney"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 text-sm font-medium text-foreground/60 transition hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                    >
-                      Announcement
-                      <ArrowUpRight className="h-4 w-4" />
-                    </a>
-                    <Link
-                      href="/#citrea"
-                      className="inline-flex items-center gap-2 text-sm font-semibold text-primary transition hover:text-primary/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                      aria-label="Stake sGUSD"
-                    >
-                      Stake sGUSD
-                      <ArrowUpRight className="h-4 w-4" />
-                    </Link>
+                    <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5">
+                      <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground">
+                        Staked
+                      </p>
+                    <p className="mt-1 text-lg font-bold text-foreground">
+                        <CitreaStakedValue />
+                    </p>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
             <div
-              className="group relative min-h-[240px] overflow-hidden rounded-2xl border border-border/60 bg-background/95 p-6 shadow-[0_20px_40px_-35px_rgba(15,23,42,0.35)] transition duration-300 hover:-translate-y-1 hover:shadow-[0_25px_55px_-35px_rgba(15,23,42,0.45)] motion-reduce:transform-none motion-reduce:transition-none animate-in fade-in-0 slide-in-from-bottom-4 duration-700"
+              className="group relative min-h-[240px] overflow-hidden rounded-2xl border border-border/60 bg-background/95 p-6 shadow-[0_20px_40px_-35px_rgba(15,23,42,0.35)] transition duration-300 hover:-translate-y-1 hover:shadow-[0_25px_55px_-35px_rgba(15,23,42,0.45)] motion-reduce:transform-none motion-reduce:transition-none animate-in fade-in-0 slide-in-from-bottom-4 duration-700 lg:order-3"
               style={{ animationDelay: "120ms" }}
             >
               <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_120%_at_0%_0%,hsl(var(--accent)/0.45)_0%,transparent_60%)] opacity-90" />
               <div className="relative flex h-full flex-col gap-4">
                 <div className="flex items-start justify-between gap-4">
-                  <div className="space-y-2">
+                  <div className="space-y-1">
                     <h3 className="text-lg font-semibold">
                       Status L2 predeposit vault
                     </h3>
+                    <p className="text-xs text-muted-foreground">
+                      Early access predeposit vault.
+                    </p>
                   </div>
                   <span className="flex h-10 w-10 items-center justify-center rounded-full border border-border/60 bg-background/80 text-primary shadow-sm">
                     <ShieldCheck className="h-5 w-5" />
                   </span>
                 </div>
-                <p className="text-sm text-muted-foreground">
-                  Early access to a privacy-forward Status L2 vault. Lock now,
-                  unlock at launch — no penalties
-                </p>
                 <div className="mt-auto space-y-3">
-                  <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5 text-xs text-muted-foreground">
-                    <div className="space-y-2">
-                      <p>
-                        15M SNT and 20M LINEA liquid rewards are available for
-                        pre-depositors across Status vaults, including GUSD and
-                        other Status portfolio vaults.
-                      </p>
-                      <p>
-                        Allocation of liquid incentives and Karma reflects
-                        vault TVL, time in vaults, and potential testnet v1/v2
-                        activity multipliers. APY varies with overall
-                        participation and Generic refreshes it daily.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-4">
-                    <a
-                      href="https://x.com/genericmoney"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 text-sm font-medium text-foreground/70 transition hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                    >
-                      Announcement
-                      <ArrowUpRight className="h-4 w-4" />
-                    </a>
-                    <a
-                      href="https://hub.status.network/pre-deposits"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 text-sm font-medium text-foreground/70 transition hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                      aria-label="Open Status pre-deposits"
-                    >
-                      Strategies
-                      <ArrowUpRight className="h-4 w-4" />
-                    </a>
+                  <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5">
+                    <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground">
+                      TVL
+                    </p>
+                    <p className="mt-1 text-lg font-bold text-foreground">
+                      <StatusTvlValue />
+                    </p>
                   </div>
                 </div>
               </div>
             </div>
             <div
-              className="hidden group relative min-h-[240px] overflow-hidden rounded-2xl border border-border/60 bg-background/95 p-6 shadow-[0_20px_40px_-35px_rgba(15,23,42,0.35)] transition duration-300 hover:-translate-y-1 hover:shadow-[0_25px_55px_-35px_rgba(15,23,42,0.45)] motion-reduce:transform-none motion-reduce:transition-none animate-in fade-in-0 slide-in-from-bottom-4 duration-700"
+              className="group relative min-h-[240px] overflow-hidden rounded-2xl border border-border/60 bg-background/95 p-6 shadow-[0_20px_40px_-35px_rgba(15,23,42,0.35)] transition duration-300 hover:-translate-y-1 hover:shadow-[0_25px_55px_-35px_rgba(15,23,42,0.45)] motion-reduce:transform-none motion-reduce:transition-none animate-in fade-in-0 slide-in-from-bottom-4 duration-700 lg:order-1"
               style={{ animationDelay: "200ms" }}
             >
               <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(130%_120%_at_100%_100%,hsl(var(--primary)/0.12)_0%,transparent_60%)] opacity-90" />
               <div className="relative flex h-full flex-col gap-4">
                 <div className="flex items-start justify-between gap-4">
-                  <div className="space-y-2">
-                    <span className="inline-flex w-fit items-center rounded-full border border-border/60 bg-background/70 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Mainnet GUSD
-                    </span>
+                  <div className="space-y-1">
                     <h3 className="text-lg font-semibold">
                       Mainnet GUSD for payments
                     </h3>
+                    <p className="text-xs text-muted-foreground">
+                      Mainnet-backed GUSD liquidity.
+                    </p>
                   </div>
                   <span className="flex h-10 w-10 items-center justify-center rounded-full border border-border/60 bg-background/80 text-primary shadow-sm">
                     <Coins className="h-5 w-5" />
                   </span>
                 </div>
-                <p className="text-sm text-muted-foreground">
-                  Simple payments stablecoin with up to 5% APY. No hustle, no
-                  extra steps
-                </p>
                 <div className="mt-auto space-y-3">
-                  <div className="grid gap-3">
-                    <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5">
-                      <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground">
-                        Up to
-                      </p>
-                      <p className="mt-1 text-lg font-bold text-foreground">
-                        {OPPORTUNITY_APY_CAP.mainnet} APY
-                      </p>
-                    </div>
+                  <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5">
+                    <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground">
+                      TVL
+                    </p>
+                    <p className="mt-1 text-lg font-bold text-foreground">
+                      <MainnetTvlValue />
+                    </p>
                   </div>
-                  <div className="flex flex-wrap items-center gap-4">
-                    <a
-                      href="https://x.com/genericmoney"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 text-sm font-medium text-foreground/70 transition hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                    >
-                      Announcement
-                      <ArrowUpRight className="h-4 w-4" />
-                    </a>
-                    <Link
-                      href="/documentation"
-                      className="inline-flex items-center gap-2 text-sm font-medium text-foreground/70 transition hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                      aria-label="Open strategies"
-                    >
-                      Strategies
-                      <ArrowUpRight className="h-4 w-4" />
-                    </Link>
+                  <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5 text-xs text-muted-foreground">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-foreground/80">
+                      Collateral breakdown
+                    </p>
+                    <MainnetCollateralBreakdown />
                   </div>
                 </div>
               </div>

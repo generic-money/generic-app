@@ -409,7 +409,19 @@ export function DepositSwap() {
   const { address: accountAddress } = useAccount();
   const activeChainId = useChainId();
   const chainName = getChainNameById(activeChainId);
-  const stablecoins = useMemo(() => getStablecoins(chainName), [chainName]);
+  const {
+    route: depositRoute,
+    setRoute: setDepositRoute,
+    flow,
+    setFlow,
+  } = useOpportunityRoute();
+  const isDepositFlow = flow === "deposit";
+  const isCitreaReturnFlow = !isDepositFlow && depositRoute === "citrea";
+  const stablecoinChainName = isCitreaReturnFlow ? CHAINS.MAINNET : chainName;
+  const stablecoins = useMemo(
+    () => getStablecoins(stablecoinChainName),
+    [stablecoinChainName],
+  );
   const publicClient = usePublicClient({ chainId: activeChainId });
   const mainnetClient = usePublicClient({ chainId: MAINNET_CHAIN_ID });
   const { writeContractAsync } = useWriteContract();
@@ -423,19 +435,15 @@ export function DepositSwap() {
   });
   const [selectedTicker, setSelectedTicker] =
     useState<StablecoinTicker>("USDC");
-  const {
-    route: depositRoute,
-    setRoute: setDepositRoute,
-    flow,
-    setFlow,
-  } = useOpportunityRoute();
-  const isDepositFlow = flow === "deposit";
-  const isCitreaReturnFlow = !isDepositFlow && depositRoute === "citrea";
   const isPredepositRedeem = !isDepositFlow && depositRoute === "predeposit";
+  const isOnMainnet = activeChainId === MAINNET_CHAIN_ID;
   const requiredChainId = isCitreaReturnFlow
-    ? CITREA_CHAIN_ID_NUMBER
+    ? isOnMainnet
+      ? MAINNET_CHAIN_ID
+      : CITREA_CHAIN_ID_NUMBER
     : MAINNET_CHAIN_ID;
-  const requiredChainLabel = isCitreaReturnFlow ? "Citrea" : "Ethereum";
+  const requiredChainLabel =
+    requiredChainId === MAINNET_CHAIN_ID ? "Ethereum" : "Citrea";
   const isOnRequiredChain = activeChainId === requiredChainId;
   const shouldSwitchChain = Boolean(accountAddress) && !isOnRequiredChain;
   const [fromAmount, setFromAmount] = useState("");
@@ -489,7 +497,7 @@ export function DepositSwap() {
   const formDescription = isDepositFlow
     ? selectedOpportunity.formDescription
     : isCitreaReturnFlow
-      ? "Bridge Citrea GUSD back to mainnet."
+      ? "Bridge Citrea GUSD back to mainnet, then redeem into your selected stablecoin."
       : isPredepositRedeem
         ? "Status predeposits are locked until launch."
         : "Redeem GUSD back into your selected stablecoin.";
@@ -511,20 +519,20 @@ export function DepositSwap() {
   };
 
   const l1GusdAddress = gusd.getAddress(chainName);
-  const gusdAddress = isCitreaReturnFlow
-    ? CITREA_WHITELABEL_ADDRESS
-    : l1GusdAddress;
+  const gusdAddress =
+    isCitreaReturnFlow && !isOnMainnet
+      ? CITREA_WHITELABEL_ADDRESS
+      : l1GusdAddress;
 
-  const stablecoinAddress = isCitreaReturnFlow
-    ? undefined
-    : selectedStablecoin?.tokenAddress;
-  const vaultAddress = isCitreaReturnFlow
-    ? undefined
-    : (selectedStablecoin?.depositVaultAddress as HexAddress | undefined);
+  const stablecoinAddress = selectedStablecoin?.tokenAddress;
+  const vaultAddress = selectedStablecoin?.depositVaultAddress as
+    | HexAddress
+    | undefined;
   const stablecoinChainId = MAINNET_CHAIN_ID;
-  const gusdChainId = isCitreaReturnFlow
-    ? CITREA_CHAIN_ID_NUMBER
-    : MAINNET_CHAIN_ID;
+  const gusdChainId =
+    isCitreaReturnFlow && !isOnMainnet
+      ? CITREA_CHAIN_ID_NUMBER
+      : MAINNET_CHAIN_ID;
   const stablecoinBlockNumber =
     activeChainId === stablecoinChainId ? blockNumber : undefined;
   const gusdBlockNumber =
@@ -659,11 +667,7 @@ export function DepositSwap() {
 
   const fromAssetType: AssetType = isDepositFlow ? "stablecoin" : "gusd";
 
-  const toAssetType: AssetType = isDepositFlow
-    ? "gusd"
-    : isCitreaReturnFlow
-      ? "gusd"
-      : "stablecoin";
+  const toAssetType: AssetType = isDepositFlow ? "gusd" : "stablecoin";
 
   const fromBalanceHook =
     fromAssetType === "stablecoin"
@@ -805,7 +809,9 @@ export function DepositSwap() {
 
   const shouldUseVaultPreview = isDepositFlow
     ? !isNonMainnetDeposit && !shouldSwitchChain
-    : !isCitreaReturnFlow && !isPredepositRedeem && !shouldSwitchChain;
+    : !isPredepositRedeem &&
+      !shouldSwitchChain &&
+      (!isCitreaReturnFlow || isOnMainnet);
 
   const { quote: previewToAmount, parsedAmount } = useErc4626Preview({
     amount: fromAmount,
@@ -845,6 +851,7 @@ export function DepositSwap() {
     token: !isDepositFlow ? genericUnitTokenAddress : undefined,
     owner: accountAddress,
     spender: !isDepositFlow ? vaultAddress : undefined,
+    chainIdOverride: !isDepositFlow ? MAINNET_CHAIN_ID : undefined,
   });
 
   const {
@@ -854,6 +861,7 @@ export function DepositSwap() {
     token: isCitreaReturnFlow ? CITREA_WHITELABEL_ADDRESS : undefined,
     owner: accountAddress,
     spender: isCitreaReturnFlow ? BRIDGE_COORDINATOR_L2_ADDRESS : undefined,
+    chainIdOverride: isCitreaReturnFlow ? CITREA_CHAIN_ID_NUMBER : undefined,
   });
 
   const { allowance: stakeAllowance, refetchAllowance: refetchStakeAllowance } =
@@ -891,7 +899,9 @@ export function DepositSwap() {
   const needsApproval = isDepositFlow
     ? needsDepositApproval
     : isCitreaReturnFlow
-      ? needsCitreaApproval
+      ? isOnMainnet
+        ? needsRedeemApproval
+        : needsCitreaApproval
       : needsRedeemApproval;
   const fromBalanceValue = (() => {
     const data = fromBalanceHook.data;
@@ -1041,6 +1051,37 @@ export function DepositSwap() {
   const pendingBridgeStatusLabel = pendingBridgeForRoute?.status
     ? pendingBridgeForRoute.status.replace(/_/g, " ").toLowerCase()
     : "pending";
+  const latestCitreaToL1 = useMemo(() => {
+    if (!accountAddress) {
+      return null;
+    }
+
+    return lzBridgeRecords.reduce<LzBridgeRecord | null>((latest, record) => {
+      if (record.direction !== "citrea-to-l1") {
+        return latest;
+      }
+      if (record.account.toLowerCase() !== accountAddress.toLowerCase()) {
+        return latest;
+      }
+      if (!latest || record.createdAt > latest.createdAt) {
+        return record;
+      }
+      return latest;
+    }, null);
+  }, [accountAddress, lzBridgeRecords]);
+  const citreaReturnStatus = latestCitreaToL1?.status;
+  const citreaReturnDelivered =
+    (citreaReturnStatus ?? "").toUpperCase() === "DELIVERED";
+  const citreaReturnFinal = isFinalLzStatus(citreaReturnStatus);
+  const citreaReturnStatusLabel = citreaReturnStatus
+    ? citreaReturnStatus.replace(/_/g, " ").toLowerCase()
+    : "pending";
+  const citreaReturnPending = Boolean(pendingCitreaToL1);
+  const hasMainnetGusdBalance =
+    (gusdMainnetBalance.data?.value ?? ZERO_AMOUNT) > ZERO_AMOUNT;
+  const citreaReturnReadyForRedeem = Boolean(
+    isCitreaReturnFlow && (hasMainnetGusdBalance || citreaReturnDelivered),
+  );
 
   useEffect(() => {
     let visibleTimeout: number | undefined;
@@ -1213,7 +1254,11 @@ export function DepositSwap() {
       : isBridgeAndStakeFlow
         ? "Bridge & Stake"
         : "Mint";
-  const redeemActionLabel = isCitreaReturnFlow ? "Bridge" : "Redeem";
+  const redeemActionLabel = isCitreaReturnFlow
+    ? isOnMainnet
+      ? "Redeem"
+      : "Bridge"
+    : "Redeem";
 
   const buttonState = useMemo(() => {
     const actionLabel = isDepositFlow ? depositButtonLabel : redeemActionLabel;
@@ -1224,6 +1269,16 @@ export function DepositSwap() {
 
     if (isPredepositRedeem) {
       return { label: "Locked", disabled: true };
+    }
+
+    if (isCitreaReturnFlow && isOnMainnet && !citreaReturnReadyForRedeem) {
+      if (citreaReturnPending) {
+        return { label: "Waiting for bridge…", disabled: true };
+      }
+      if (citreaReturnFinal) {
+        return { label: "Bridge failed", disabled: true };
+      }
+      return { label: "Switch to Citrea", disabled: !switchChainAsync };
     }
 
     if (shouldSwitchChain) {
@@ -1256,7 +1311,7 @@ export function DepositSwap() {
         return { label: "GUSD unavailable", disabled: true };
       }
 
-      if (!isCitreaReturnFlow) {
+      if (!isCitreaReturnFlow || isOnMainnet) {
         if (!genericUnitTokenAddress) {
           return { label: "Generic unit unavailable", disabled: true };
         }
@@ -1290,12 +1345,16 @@ export function DepositSwap() {
     return { label: actionLabel, disabled: false };
   }, [
     accountAddress,
+    citreaReturnFinal,
+    citreaReturnPending,
+    citreaReturnReadyForRedeem,
     depositButtonLabel,
     depositorAddress,
     gusdAddress,
     genericUnitTokenAddress,
     isCitreaReturnFlow,
     isDepositFlow,
+    isOnMainnet,
     isNonMainnetDeposit,
     isPredepositRedeem,
     needsApproval,
@@ -1923,11 +1982,6 @@ export function DepositSwap() {
   ]);
 
   const handleRedeem = async () => {
-    if (isCitreaReturnFlow) {
-      await handleCitreaReturn();
-      return;
-    }
-
     if (
       !accountAddress ||
       !vaultAddress ||
@@ -2072,6 +2126,13 @@ export function DepositSwap() {
       return;
     }
 
+    if (isCitreaReturnFlow && isOnMainnet && !citreaReturnReadyForRedeem) {
+      if (!citreaReturnPending && !citreaReturnFinal && switchChainAsync) {
+        await switchChainAsync({ chainId: CITREA_CHAIN_ID_NUMBER });
+      }
+      return;
+    }
+
     if (shouldSwitchChain) {
       if (switchChainAsync) {
         await switchChainAsync({ chainId: requiredChainId });
@@ -2089,7 +2150,14 @@ export function DepositSwap() {
     }
 
     if (isCitreaReturnFlow) {
-      await handleCitreaReturn();
+      if (isOnMainnet) {
+        if (!citreaReturnReadyForRedeem) {
+          return;
+        }
+        await handleRedeem();
+      } else {
+        await handleCitreaReturn();
+      }
       return;
     }
 
@@ -2204,9 +2272,17 @@ export function DepositSwap() {
   const fromChainLabel = isDepositFlow
     ? depositFromChainLabel
     : isCitreaReturnFlow
-      ? "Citrea"
+      ? isOnMainnet
+        ? "Ethereum"
+        : "Citrea"
       : "Ethereum";
   const toChainLabel = isDepositFlow ? depositToChainLabel : "Ethereum";
+  const fromAssetLabelOverride =
+    !isDepositFlow && isCitreaReturnFlow && fromAssetType === "gusd"
+      ? isOnMainnet
+        ? "GUSD"
+        : "Citrea GUSD"
+      : undefined;
 
   const renderAssetSelector = (
     assetType: AssetType,
@@ -2327,7 +2403,10 @@ export function DepositSwap() {
                 <SwapAssetPanel
                   label="From"
                   chainLabel={fromChainLabel}
-                  selector={renderAssetSelector(fromAssetType)}
+                  selector={renderAssetSelector(
+                    fromAssetType,
+                    fromAssetLabelOverride,
+                  )}
                   inputProps={{
                     placeholder: fromPlaceholder,
                     autoComplete: "off",
@@ -2425,6 +2504,19 @@ export function DepositSwap() {
                   Bridge in progress ·{" "}
                   {pendingBridgeStatusLabel.slice(0, 1).toUpperCase() +
                     pendingBridgeStatusLabel.slice(1)}
+                </p>
+              ) : null}
+              {!pendingBridgeForRoute &&
+              isCitreaReturnFlow &&
+              citreaReturnFinal ? (
+                <p className="text-center text-xs text-muted-foreground">
+                  {citreaReturnDelivered
+                    ? isOnMainnet
+                      ? "Bridge complete — ready to redeem."
+                      : "Bridge complete — switch to Ethereum to redeem."
+                    : `Bridge ${citreaReturnStatusLabel
+                        .replace(/^./, (char) => char.toUpperCase())
+                        .trim()}.`}
                 </p>
               ) : null}
               {!txError && insufficientBalance ? (

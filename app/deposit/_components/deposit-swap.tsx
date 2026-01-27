@@ -1043,6 +1043,13 @@ export function DepositSwap() {
   const pendingCitreaToL1 = pendingLzRecords.find(
     (record) => record.direction === "citrea-to-l1",
   );
+  const isBridgeToCitreaPending =
+    bridgeStakeState === "bridging" ||
+    bridgeStakeState === "waiting" ||
+    Boolean(pendingL1ToCitrea);
+  const isStakeAutoBridgeFlow = isCitreaDeposit && stakeAfterBridge;
+  const isStakeAutoBridgePending =
+    isStakeAutoBridgeFlow && bridgeStakeState !== "complete";
   const pendingBridgeForRoute = isCitreaReturnFlow
     ? pendingCitreaToL1
     : isCitreaDeposit
@@ -1380,7 +1387,16 @@ export function DepositSwap() {
       return { label: "Connect wallet", disabled: true };
     }
 
-    if (bridgeStakeState === "bridging" || bridgeStakeState === "waiting") {
+    if (isStakeAutoBridgePending) {
+      return {
+        label: isBridgeToCitreaPending
+          ? "Waiting for bridge…"
+          : "Bridge to stake",
+        disabled: true,
+      };
+    }
+
+    if (isBridgeToCitreaPending) {
       return { label: "Waiting for bridge…", disabled: true };
     }
 
@@ -1417,6 +1433,8 @@ export function DepositSwap() {
     accountAddress,
     activeChainId,
     bridgeStakeState,
+    isBridgeToCitreaPending,
+    isStakeAutoBridgePending,
     needsStakeApproval,
     stakeInsufficientBalance,
     stakeTargetAmount,
@@ -2650,7 +2668,10 @@ export function DepositSwap() {
                     .replace(/^./, (char) => char.toUpperCase())}
                 </p>
               ) : null}
-              {!stakeError && isStakeMode && stakeInsufficientBalance ? (
+              {!stakeError &&
+              isStakeMode &&
+              stakeInsufficientBalance &&
+              !isStakeAutoBridgePending ? (
                 <p className="text-center text-xs text-destructive">
                   Stake amount exceeds your Citrea balance.
                 </p>

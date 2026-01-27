@@ -532,7 +532,7 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
   return (
     <aside
       className={cn(
-        "relative z-50 flex h-[520px] overflow-hidden rounded-l-3xl rounded-r-none border border-border/60 bg-card/60 transition-[width] duration-300 ease-out",
+        "relative z-50 flex h-[520px] overflow-hidden rounded-l-3xl rounded-r-none border border-border/60 bg-card shadow-[0_30px_70px_-45px_rgba(15,23,42,0.55)] transition-[width] duration-300 ease-out",
         open ? "w-80" : "w-12",
         className,
       )}

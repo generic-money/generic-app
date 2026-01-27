@@ -53,8 +53,47 @@ const gilroy = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Generic Money",
-  description: "Generic Money dashboard",
+  title: "Generic USD",
+  description: "A better onchain dollar.",
+  metadataBase: new URL("https://app.generic.money"),
+  openGraph: {
+    title: "Generic USD",
+    description: "A better onchain dollar.",
+    url: "https://app.generic.money",
+    siteName: "Generic USD",
+    images: [
+      {
+        url: "/opengraph.jpeg",
+        width: 1200,
+        height: 630,
+        alt: "Generic USD",
+      },
+    ],
+    locale: "en_US",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    site: "@genericmoney",
+    title: "Generic USD",
+    description: "A better onchain dollar.",
+    images: ["/opengraph.jpeg"],
+  },
+  themeColor: "#3F79FF",
+  keywords: [
+    "defi",
+    "stablecoin",
+    "onchain",
+    "usd",
+    "crypto",
+    "web3",
+    "yield",
+    "lending",
+    "liquidity",
+    "token",
+    "digital dollar",
+    "fiat-backed",
+  ],
   icons: {
     icon: [
       { rel: "icon", url: "/Icon.svg" },

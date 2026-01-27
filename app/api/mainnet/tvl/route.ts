@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { createPublicClient, formatUnits, http } from "viem";
 import { mainnet } from "viem/chains";
 
-const UNIT_TOKEN = "0x8c307baDbd78bEa5A1cCF9677caa58e7A2172502";
+const UNIT_TOKEN: `0x${string}` =
+  "0x8c307baDbd78bEa5A1cCF9677caa58e7A2172502";
 const MAINNET_VAULTS = [
   {
     symbol: "USDC",
@@ -16,7 +17,7 @@ const MAINNET_VAULTS = [
     symbol: "USDS",
     address: "0x6133dA4Cd25773Ebd38542a8aCEF8F94cA89892A",
   },
-];
+] as const satisfies ReadonlyArray<{ symbol: string; address: `0x${string}` }>;
 const DECIMALS = 18;
 
 const RPC_URLS = [process.env.MAINNET_RPC_URL].filter(Boolean) as string[];

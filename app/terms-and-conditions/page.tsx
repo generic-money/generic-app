@@ -5,221 +5,105 @@ export default function TermsOfServicePage() {
         Terms Of Service
       </h1>
       <div className="mt-6 space-y-4 text-sm leading-7 text-muted-foreground">
-        The following terms of service (the “Terms”) constitute a binding agreement between you (“You” or “your”) and MetaFi Labs AG, with registered office at Bahnhofstrasse 7, Zug, Switzerland (hereinafter “us” or “MetaFi”) in connection with your use of the Service.These Terms also govern your interaction with any websites, platform or application (the “Platform”) owned or operated by us. MetaFi provides a platform that allows users to deposit different stablecoins and receive GUSD or a whitelabeled instance on a network of their choice, using code-based smart contracts on a blockchain.
-
-
-More generally, these Terms regulate your use of any MetaFi products or services (all together the “Services”).Before proceeding, please read and understand the following Terms together with the MetaFi legal disclaimer governing the use of the MetaFi’s Platform and any of its associated initiatives. Please read them carefully. If You do not agree with any of the provisions stated herein, You should not use MetaFi’s Platform or associated services.
-
-
-‍USERS ACKNOWLEDGE THAT PARTICIPATING IN DEFI INVOLVES INHERENT RISKS, INCLUDING BUT NOT LIMITED TO MARKET VOLATILITY, SMART CONTRACT VULNERABILITIES, REGULATORY UNCERTAINTIES, AND POTENTIAL LOSS OF FUNDS. 
-
-
-‍By accessing and/or using the Services, You have read, understood, and accepted all of the following Terms and agree to be legally bound by these Terms, in their most recent version. 
-
-
-You further represent and warrant that:
-
-
-(i) You are of legal age to enter into a binding agreement; (ii) if You are not of legal age to enter into a binding agreement, You are at least 18 (eighteen) years old, or the legal age in your jurisdiction, with no legal impediment or incapacity; (iii) if You represent a corporation, governmental organization or other legal entity, You have the right, power and authority to enter into these Terms on behalf of such corporation, governmental organization or other legal entity and to legally bind it to these Terms; and (iv) You have no legal impediment or incapability and you are capable of using MetaFi’s Platform or associated services.
-
-
-Your access and/or use of the Services is contingent upon your acceptance of these Terms.
-
-
-MetaFi may amend these Terms at any time. Amendments will be effective 14 (fourteen) days after the modified terms and conditions have been posted on its website, except for amendments that relate to new features or made for legal reasons, which will become effective immediately. If You do not agree to such modified Terms, You should discontinue your use of the Services.
-
-
-MetaFi
-
-
-‍To use MetaFi’s Platform, You must use non-custodial wallet software, which allows You to interact with public blockchains. Your use of a non-custodial wallet provider is governed by the applicable terms of service of that third party and are not governed by these Terms. 
-
-
-YOU ACKNOWLEDGE THAT USING METAFI INVOLVES CERTAIN RISKS, INCLUDING BUT NOT LIMITED TO THE POTENTIAL LOSS OF YOUR DIGITAL ASSETS. YOU SHOULD CONDUCT YOUR OWN INDEPENDENT RESEARCH AND SEEK PROFESSIONAL ADVICE BEFORE USING METAFI. WE RESERVE THE RIGHT TO REFUSE OR CANCEL YOUR PARTICIPATION FOR ANY REASON AT ITS SOLE DISCRETION.
-
-
-‍Eligibility
-
-
-By accessing and using MetaFi’s Services You represent and warrant to us that:
-‍
-- You have read and understood the risks of using MetaFi’s Services, and that You are solely responsible for your actions.
-- You are acting on your own account as principal and not as trustee, agent or otherwise on behalf of any other persons or entities.
-- You have had the opportunity to take legal, financial, accounting or other advice that You deem appropriate prior to using MetaFi’s Services.
-- You will only use MetaFi’s Services with legally obtained digital assets that belong to You, and with full legal and beneficial title to any such assets.
-- You are not a resident of any restricted territory and have not used any technical means to misrepresent its geographical location to access and use MetaFi’s Services from any restricted territory.
-- Your access to MetaFi’s Services may be restricted based on your jurisdiction or geographical location.
-- You must not use MetaFi’s Services if You are located in or a citizen or resident of any state, country, territory or other jurisdiction in which use of MetaFi would be illegal or otherwise violate any applicable law (a “Restricted Territory”).
-
-
-‍We reserve the right to restrict access to any Restricted Territory and may implement technical controls to prevent access to MetaFi from any Restricted Territory, including, but not limited to, Algeria, Bangladesh, Bolivia, Belarus, Myanmar (Burma), Côte d’Ivoire (Ivory Coast), Egypt, Republic of  Crimea, Cuba, Democratic Republic of the Congo, Iran, Iraq, Liberia, Libya, Mali, Morocco, Nepal, North Korea, Kuwait, Oman, Qatar, Somalia, Sudan, Switzerland, Syria, Tunisia, United States, Venezuela, Yemen, Zimbabwe, or any jurisdictions in which the sale of cryptocurrencies are prohibited, restricted or unauthorized in any form or manner whether in full or in part under the laws, regulatory requirements or rules in such jurisdiction; or any state, country, or region that is subject to sanctions enforced by the United States, such as the Specially Designated Nationals and Blocked Persons List (“SDN List”) and Consolidated Sanctions List (“Non-SDN Lists”), the United Kingdom, or the European Union (collectively, “Restricted Territories”);
-
-
-‍You represent that your access and use of MetaFi’s Services will fully comply with all applicable laws and regulations, and that You will not access or use MetaFi’s Services to conduct, promote, or otherwise facilitate any illegal activity.
-
-
-Risks
-
-
-By accessing and using MetaFi’s Services, You represent that You understand the financially and technically risks associated with using cryptographic and blockchain-based systems, including, to the extent that:
-- You understand that the markets for these digital assets are nascent and highly volatile due to risk factors including, but not limited to, adoption, speculation, technology, security, and regulation.
-- You understand that anyone can create fake versions of existing tokens and tokens that falsely claim to represent DAOs, projects, and acknowledge and accept the risk that You may mistakenly trade those or other tokens. 
-- You understand that smart contract transactions automatically execute and settle, and that blockchain-based transactions are irreversible when confirmed. 
-- You acknowledge and accept that the cost and speed of transacting with cryptographic and blockchain-based systems such as Ethereum are variable and may increase dramatically at any time.
-- You acknowledge that we are not responsible for any of these variables or risks, do not own or control the protocol, and cannot be held liable for any resulting losses that You experience while accessing or using MetaFi’s Services.
-- You understand and agree that MetaFi is not a stablecoin issuer and that GUSD is a receipt token built via smart contract code that aggregates stablecoins and programmatically allocates the deposits into a smart-contract lending protocol in order to generate yield. There are risks to any deposits into any lending protocol and you must complete your own due diligence to ascertain if you want to take this risk.
-- You understand and agree to assume full responsibility for all of the risks of accessing and using MetaFi’s Services.
-- You understand that we do not own or control any of the underlying software through which blockchain networks are formed. In general, the software underlying blockchain networks, including the Ethereum blockchain, is open source, such that anyone can use, copy, modify, and distribute it.
-
-
-By using MetaFi’s Services, You acknowledge and agree, that:
-
-
-- MetaFi is not responsible for the operation of the blockchain-based software and networks underlying the MetaFi’s Platform;
-- there exists no guarantee of the functionality, security, or availability of that software and networks;
-- and  anybody may develop a patch or upgrade the source code without prior authorization of anyone else on the underlying blockchain-based network. The acceptance of potential future patches or upgrades by a significant, but not overwhelming, percentage of the users could result in a “fork” in the underlying blockchain-based network, and, consequently, the operation of two separate networks will remain separate until the forked blockchains are merged. The temporary or permanent existence of forked blockchains could adversely impact MetaFi’s Services. While such a fork in the blockchain could possibly be resolved by community-led efforts to merge the forked blockchains, the success is not guaranteed and could take a long period of time to achieve.
-- You understand that blockchain networks use public and private key cryptography.
-- You alone are responsible for securing your private key(s). We do not have access to your private key(s). Losing control of your private key(s) will permanently and irreversibly deny You access to digital assets on the Ethereum blockchain or other blockchain based network. If your private key(s) are lost, then You will not be able to transfer your digital assets to any other blockchain address or wallet. If this occurs, then You will not be able to realize any value or utility from the digital assets that You may hold.
-- You understand that our Services and your digital assets could be impacted by one or more regulatory inquiries or regulatory actions, which could impede or limit the ability to continue providing our Services.
-- You acknowledge that the cost of transacting on the Ethereum blockchain is variable and may increase at any time causing impact to any activities taking place on the Ethereum blockchain, which may result in price fluctuations or increased costs when using MetaFi’s Services.
-- You use MetaFi’s Services at your own risk. You acknowledge that MetaFi’s Platform could be subject to flaws and that You are solely responsible for evaluating any output provided by MetaFi’s Platform.
-- You acknowledge that the information available on MetaFi’s Platform may not always be entirely accurate, complete, or current and may also include technical inaccuracies or typographical errors. To continue to provide You with as complete and accurate information as possible, information may be changed or updated from time to time without notice, including information regarding our policies. Accordingly, You should verify all information before relying on it, and all decisions based on information contained on or as part of MetaFi interface are your sole responsibility. No representation is made as to the accuracy, completeness, or appropriateness for any particular purpose of any information distributed via or otherwise when using MetaFi’s Platform.
-- By using MetaFi’s Services, You represent and warrant that You have been, are, and will be solely responsible for making your independent appraisal and investigations into the risks of a given transaction and the underlying digital assets, including smart contracts. You represent that You have sufficient knowledge, market sophistication, professional advice, and experience to make your evaluation of the merits and risks of any transaction conducted in connection with MetaFi or any digital asset.
-- You accept all consequences of using all MetaFi’s Services, including the risk that You may lose access to your digital assets indefinitely. All transaction decisions are made solely by You. Notwithstanding anything in these Terms, we accept no responsibility whatsoever for and will in no circumstances be liable to You in connection with, the use of the Platform or any other MetaFi’s Services, including but not limited to performing digital asset transactions, and entering into smart contracts.
-- You understand that You are responsible for transactions You execute, including any erroneous orders that may be filled. We do not take any action to resolve erroneous trades that result from your errors.
-- You hereby acknowledge and agree that we will have no responsibility or liability for the risks set forth in this Section or inherent to the use of MetaFi’s Services.
-- You hereby irrevocably waive, release, and discharge all claims, whether known or unknown to You, against us and our shareholders, members, directors, officers, employees, agents, and representatives, suppliers, and contractors related to any of the risks set forth in this Section or inherent to the use of MetaFi’s Services.
-- You understand and acknowledge that before You use MetaFi’s Services, You should be familiar with any rules or laws relevant to the Services provided. 
-- You should obtain independent advice about the different types of services available in both your home jurisdiction and other relevant jurisdictions before You start using MetaFi’s Services. If your country of residence imposes restrictions on digital assets, we may be required to discontinue your access to MetaFi’s Platform. We may not be permitted to transfer digital assets or permit the transfer of digital assets because of a judicial or administrative order or regulatory environment. 
-- You are responsible for all taxes in respect of any gains obtained by using MetaFi’s Services. Before using our Services, You should understand the tax implications of acquiring, entering into, holding and disposing of a digital asset. You should consult your independent tax advisor to understand the relevant tax implications of your activities.
-
-
-‍YOU UNDERSTAND THAT THE USE OF METAFI IS EXPOSED TO REGULATORY AND LEGAL RISK, AND THAT THE REGULATORY FRAMEWORK OF DIGITAL ASSETS MAY CHANGE OR VARY ACCORDING TO EACH JURISDICTION. THE EFFECT OF REGULATORY LEGAL RISK MAY AFFECT THE VALUE OF ANY DIGITAL ASSET. THE LAWS OF VARIOUS JURISDICTIONS MAY APPLY TO DIGITAL ASSETS. APPLYING THESE LAWS AND REGULATIONS TO DIGITAL ASSETS IS UNTESTED, AND LAWS AND REGULATIONS ARE SUBJECT TO CHANGE WITHOUT PRIOR NOTICE. AS A RESULT OF REGULATION AND LEGISLATION AROUND DIGITAL ASSETS, METAFI MAY BECOME OR NOT BE AVAILABLE IN CERTAIN JURISDICTIONS. 
-
-
-Prohibited activities
-
-
-You agree not to engage in, or attempt to engage in, any of the following categories of prohibited activities in connection to your access and use of MetaFi’s Services. Specifically, activities that:
-
-
-- infringe on or violates any copyright, trademark, service mark, patent, right of publicity, right of privacy, or other proprietary or intellectual property rights under any law or jurisdiction;
-- seek to interfere with or compromise the integrity, security, or proper functioning of any computer, server, network, personal device, or other information technology system, including (but not limited to) the deployment of viruses and denial of service attacks (so-called “bots”, “hacks”, “change VPN” or “cheats”), nor promote their use towards third parties;
-- seek to defraud MetaFi or any other individual or entity, including (but not limited to) providing any false, inaccurate, or misleading information in order to unlawfully obtain the property of another;
-- violate any applicable law, rule, or regulation concerning the integrity of capital markets;
-- violate any applicable law, rule, or regulation concerning the trading of securities or derivatives, including (but not limited to) the unregistered offering of securities and the offering of leveraged and margin commodity products to retail or professional investors in any applicable jurisdiction; and
-- violate any applicable law, rule, or regulation in any jurisdiction, including (but not limited to) the financial regulatory requirements.
-
-
-MetaFi provides the Services solely for the use in accordance with these Terms. Only the official Platform provided by MetaFi may be used to connect to the Services offered by us. You must not create, support, host, link or provide any other options, which can be used by another person to use the Services.
-
-
-You may not add elements to the Services or to change, delete or modify in any other manner any Service elements without the prior written consent of MetaFi. In particular, You are not allowed to copy, remove or otherwise utilize any graphic elements or to try to decompile the source code of the Services provided.
-
-
-You agree that in conjunction with your use of the Services You will not make finance any unlawful or inappropriate content in accordance with the applicable laws.
-
-
-You agree that in conjunction with your use of the Services, You will maintain safe and appropriate contact with any third party, if any, and other people in the real world. You will not harass, threaten or otherwise violate the legal rights of others. If You have a dispute with any third party relating to your use of Services, You release MetaFi (and its officers, directors, agents, subsidiaries, joint ventures, and employees) from all claims, demands, and damages (actual and consequential) of every kind and nature, known and unknown, suspected and unsuspected, disclosed and undisclosed, arising out of or in any way connected with such disputes.
-
-
-Although MetaFi is not obligated to monitor access to or use of the Services, but it may have the right or the duty to do so for the purpose of operating the Services, to ensure compliance with these Terms, and to comply with applicable law or other legal requirements. MetaFi reserves the right to remove or disable access to any Services, at any time and without notice. MetaFi has the right to investigate violations of these Terms or conduct that affects the Services. MetaFi may also consult and cooperate with law enforcement authorities to prosecute users and others who violate the law.
-
-
-Non-Custodial
-
-
-The Services are non-custodial. When You deposit digital assets into any smart contract, You retain control over those digital assets at all times. The private key associated with the Ethereum address from which You transfer digital assets is the only private key that can control the digital assets You transfer into the smart contracts. You may withdraw digital assets from any smart contract only to the Ethereum address from which You deposited the digital assets. Specifically, You are the sole responsible for the custody of the cryptographic private keys to the digital asset wallets You hold to access and use our Services. 
-
-
-To the fullest extent permitted by law, You acknowledge and agree that these Terms do not create or impose any fiduciary duties on MetaFi, its affiliates and any third parties related to the Services. Specifically, MetaFi owes no fiduciary duties or liabilities to You or any other party, and that to the extent any such duties or liabilities may exist at law or in equity, those duties and liabilities are hereby irrevocably disclaimed, waived, and eliminated.
-
-
-You further agree that the only duties and obligations that MetaFi owes You are those set out expressly in these Terms.
-
-
-Privacy
-
-
-In order to provide You with the Services, You acknowledge and agree that MetaFi may collect, store and process your personal data and/or information. By accessing and/or using the Services, You have read, understood, and accepted the terms of MetaFi’s Privacy Policy, and You acknowledge and agree that MetaFi may use such data and/or information in accordance with the terms and conditions of its Privacy Policy and its Cookie Policy.
-
-
-Modification of this Terms and Suspension of the Services
-
-
-MetaFi will make reasonable efforts to keep the Services operational. However, to the extent permissible under applicable law MetaFi reserves the right, in its sole discretion, from time to time, without prior notice, to modify, suspend or disable, temporarily or permanently, the Services including the Platform, in whole or in part, for any reason whatsoever, including but not limited to security incidents, interruptions, modifications or discontinuations of the Services, regulatory restrictions, national or international court rulings and national competent authority orders. 
-
-
-MeteaFi will not be liable for any losses suffered resulting from any modification or from any suspension or termination of the Services.
-
-
-Indemnification
-
-
-To the fullest extent permitted under applicable laws, You will defend, indemnify, and hold MetaFi harmless, including MetaFi Labs AG, its affiliates, and MetaFi’s affiliates and the respective shareholders, members, directors, officers, employees, attorneys, agents, representatives, suppliers and contractors (collectively, “Indemnified Parties”) from any claim, demand, lawsuit, action, proceeding, investigation, liability, damage, loss, cost or expense, including without limitation reasonable attorneys’ fees, arising out of or relating to: 
-
-
-- your use of, or conduct in connection with MetaFi’s Services; 
-- Ethereum blockchain assets associated with your Ethereum address;
-- any feedback or user content You provide to MetaFi, if any; 
-- your violation of these Terms;
-- or your infringement or misappropriation of the rights of any other person or entity.
-
-
-If You are obliged to indemnify any Indemnified Party, we will have the right, in our sole discretion, to control any action or proceeding and to determine whether we wish to settle, and if so, on what terms.
-
-
-Limitation of Liability 
-
-
-Under no circumstances shall MetaFi, its shareholders, partners, subsidiaries, members, directors, officers, employees, attorneys, agents, representatives, suppliers and contractors be liable for any direct or indirect loss or damage arising out of or related to your use of the Services including, without limitation, the following cases: (i) interruptions, malfunctions, or other technical failures of the Services; (ii) data loss; (iii) unavailability, inaccuracy, incompleteness, unreliability, non-update of the Services or of data, metadata, events (including those related to smart contracts), information, signals, insights or other third-party content, services, or goods that may be linked to the Services; (iv) delays, errors, or interruptions in the transmission or delivery of the Service; (v) hacking, misuse, tampering, or other unauthorized access or use including but not limited to viruses, worms, trojan horses, time bombs, cancelbots, spiders, malware or other types of malicious code that may be used to affect the functionality or operation of MetaFi’s Services; (vi) “phishing” or other websites, platforms or apps impersonating MetaFi; or (vii) loss of business or reputation; (viii) any execution or settlement of a transaction, distribution of any token, any performance or non-performance of MetaFi’s Platform or any third-party services or information, whether in relation to contractual or non-contractual actions, regardless of whether such damages were foreseeable and even if MetaFi was advised of the possibility of such damages.
-
-
-In no event shall MetaFi’s liability arising out of or related to these Terms and/or the Services exceed the amount paid by You, if any, for the use of the Services.
-
-
-The Services provided by MetaFi to You are offered “as is” and MetaFi excludes all conditions, terms, representations, and warranties, express or implied, regarding the Services, including but not limited to: (i) merchantability or fitness for a particular purpose; (ii) non-infringement of laws; (iii) the information provided as part of the Services; (iv) any results derived from the Services. Moreover, MetaFi excludes any condition, express or implied warranty, term, representation regarding the correctness, quality, completeness, update accuracy, reliability, security, performance, completeness, timeliness, or continuous availability of the Services and/or the information related to them. Furthermore, although the Services are in continuous testing and improvement, MetaFi cannot guarantee that there will be no errors in connection with them.
-
-
-The above limitations of liability shall not apply where MetaFi, or an employee of MetaFi, has caused damage with intent or gross negligence. In any case, these limitations of liability shall apply to the fullest extent permitted by law.
-
-
-Termination
-
-
-These Terms are concluded for an unspecified time unless otherwise agreed in writing.
-
-
-MetaFi may terminate these Terms or suspend the Services or your access to the Platform at any time, including, without limitation, in the event of your alleged or actual misuse of the Services or breach of these Terms.
-
-
-To the fullest extent permitted under applicable laws, the provisions of these Terms will survive any termination of your access to MetaFi’s Services, regardless of the reasons for its expiration or termination.
-
-
-MISCELLANEOUS
-
-
-These Terms constitute all the terms and conditions agreed upon between You and MetaFi and supersede any prior agreements in relation to the subject matter of these Terms, whether written or oral.
-
-
-Unless as otherwise stated in these Terms, should any provision of these Terms be held totally or partially invalid or unenforceable, such invalidity or unenforceability shall not in any manner affect or render invalid or unenforceable the remaining provisions of these Terms, and the application of that provision shall be enforced to the extent permitted by applicable laws. The failure of MetaFi to exercise or enforce any of the rights or provisions of these Terms shall not be considered as a waiver of MetaFi’s rights to do so.
-
-
-MetaFi may assign these Terms and/or delegate any of its obligations hereunder, in whole or in part. You may not assign these Terms or any part of them, nor transfer or sub-license your rights under these Terms to any third party.
-
-
-MetaFi will not be deemed in default of these Terms to the extent that performance of its obligations is delayed or prevented by reason of any external force including, without limitation, war, insurrections, bank failures, strikes, fires, floods, earthquakes, labour disputes, epidemics, governmental regulations, freight embargoes, natural disaster, act of government or any other cause beyond MetaFi’s reasonable control.
-
-
-Governing Law and Jurisdiction
-
-
-These Terms shall be governed by and construed in accordance with the laws of Switzerland. 
-
-
-Any disputes arising out of or in connection with these Terms shall be subject to the exclusive jurisdiction of the courts of Zug, Switzerland. 
-
-
+<h2>The following terms of service (the &ldquo;<strong>Terms</strong>&rdquo;) constitute a binding agreement between you (&ldquo;<strong>You</strong>&rdquo; or &ldquo;<strong>your</strong>&rdquo;) and MetaFi Labs AG, with registered office at Bahnhofstrasse 7, Zug, Switzerland (hereinafter &ldquo;<strong>us</strong>&rdquo; or &ldquo;<strong>MetaFi</strong>&rdquo;) in connection with your use of the Service.These Terms also govern your interaction with any websites, platform or application (the &ldquo;<strong>Platform</strong>&rdquo;) owned or operated by us. MetaFi provides a platform that allows users to deposit different stablecoins and receive GUSD or a whitelabeled instance on a network of their choice, using code-based smart contracts on a blockchain.</h2>
+<h2>More generally, these Terms regulate your use of any MetaFi products or services (all together the &ldquo;<strong>Services</strong>&rdquo;).Before proceeding, please read and understand the following Terms together with the MetaFi legal disclaimer governing the use of the MetaFi&rsquo;s Platform and any of its associated initiatives. Please read them carefully. If You do not agree with any of the provisions stated herein, You should not use MetaFi&rsquo;s Platform or associated services.</h2>
+<h2>&zwj;<strong>USERS ACKNOWLEDGE THAT PARTICIPATING IN DEFI INVOLVES INHERENT RISKS, INCLUDING BUT NOT LIMITED TO MARKET VOLATILITY, SMART CONTRACT VULNERABILITIES, REGULATORY UNCERTAINTIES, AND POTENTIAL LOSS OF FUNDS.&nbsp;</strong></h2>
+<h2><strong>&zwj;</strong>By accessing and/or using the Services, You have read, understood, and accepted all of the following Terms and agree to be legally bound by these Terms, in their most recent version.&nbsp;</h2>
+<h2>You further represent and warrant that:</h2>
+<h2>(i) You are of legal age to enter into a binding agreement; (ii) if You are not of legal age to enter into a binding agreement, You are at least 18 (eighteen) years old, or the legal age in your jurisdiction, with no legal impediment or incapacity; (iii) if You represent a corporation, governmental organization or other legal entity, You have the right, power and authority to enter into these Terms on behalf of such corporation, governmental organization or other legal entity and to legally bind it to these Terms; and (iv) You have no legal impediment or incapability and you are capable of using MetaFi&rsquo;s Platform or associated services.</h2>
+<h2>Your access and/or use of the Services is contingent upon your acceptance of these Terms.</h2>
+<h2>MetaFi may amend these Terms at any time. Amendments will be effective 14 (fourteen) days after the modified terms and conditions have been posted on its website, except for amendments that relate to new features or made for legal reasons, which will become effective immediately. If You do not agree to such modified Terms, You should discontinue your use of the Services.</h2>
+<h2><strong>MetaFi</strong></h2>
+<h2><strong>&zwj;</strong>To use MetaFi&rsquo;s Platform, You must use non-custodial wallet software, which allows You to interact with public blockchains. Your use of a non-custodial wallet provider is governed by the applicable terms of service of that third party and are not governed by these Terms.&nbsp;</h2>
+<h2><strong>YOU ACKNOWLEDGE THAT USING METAFI INVOLVES CERTAIN RISKS, INCLUDING BUT NOT LIMITED TO THE POTENTIAL LOSS OF YOUR DIGITAL ASSETS. YOU SHOULD CONDUCT YOUR OWN INDEPENDENT RESEARCH AND SEEK PROFESSIONAL ADVICE BEFORE USING METAFI. WE RESERVE THE RIGHT TO REFUSE OR CANCEL YOUR PARTICIPATION FOR ANY REASON AT ITS SOLE DISCRETION.</strong></h2>
+<h2><strong>&zwj;Eligibility</strong></h2>
+<h2>By accessing and using MetaFi&rsquo;s Services You represent and warrant to us that:</h2>
+<h2>&zwj;</h2>
+<h2>- You have read and understood the risks of using MetaFi&rsquo;s Services, and that You are solely responsible for your actions.</h2>
+<h2>- You are acting on your own account as principal and not as trustee, agent or otherwise on behalf of any other persons or entities.</h2>
+<h2>- You have had the opportunity to take legal, financial, accounting or other advice that You deem appropriate prior to using MetaFi&rsquo;s Services.</h2>
+<h2>- You will only use MetaFi&rsquo;s Services with legally obtained digital assets that belong to You, and with full legal and beneficial title to any such assets.</h2>
+<h2>- You are not a resident of any restricted territory and have not used any technical means to misrepresent its geographical location to access and use MetaFi&rsquo;s Services from any restricted territory.</h2>
+<h2>- Your access to MetaFi&rsquo;s Services may be restricted based on your jurisdiction or geographical location.</h2>
+<h2>- You must not use MetaFi&rsquo;s Services if You are located in or a citizen or resident of any state, country, territory or other jurisdiction in which use of MetaFi would be illegal or otherwise violate any applicable law (a &ldquo;<strong>Restricted Territory</strong>&rdquo;).</h2>
+<h2>&zwj;<strong>We reserve the right to restrict access to any Restricted Territory and may implement technical controls to prevent access to MetaFi from any Restricted Territory, including, but not limited to, Algeria, Bangladesh, Bolivia, Belarus, Myanmar (Burma), C&ocirc;te d&rsquo;Ivoire (Ivory Coast), Egypt, Republic of Crimea, Cuba, Democratic Republic of the Congo, Iran, Iraq, Liberia, Libya, Mali, Morocco, Nepal, North Korea, Kuwait, Oman, Qatar, Somalia, Sudan, Switzerland, Syria, Tunisia, United States, Venezuela, Yemen, Zimbabwe, or any jurisdictions in which the sale of cryptocurrencies are prohibited, restricted or unauthorized in any form or manner whether in full or in part under the laws, regulatory requirements or rules in such jurisdiction; or any state, country, or region that is subject to sanctions enforced by the United States, such as the Specially Designated Nationals and Blocked Persons List (&ldquo;SDN List&rdquo;) and Consolidated Sanctions List (&ldquo;Non-SDN Lists&rdquo;), the United Kingdom, or the European Union (collectively, &ldquo;Restricted Territories&rdquo;);</strong></h2>
+<h2><strong>&zwj;</strong>You represent that your access and use of MetaFi&rsquo;s Services will fully comply with all applicable laws and regulations, and that You will not access or use MetaFi&rsquo;s Services to conduct, promote, or otherwise facilitate any illegal activity.</h2>
+<h2><strong>Risks</strong></h2>
+<h2>By accessing and using MetaFi&rsquo;s Services, You represent that You understand the financially and technically risks associated with using cryptographic and blockchain-based systems, including, to the extent that:</h2>
+<h2>- You understand that the markets for these digital assets are nascent and highly volatile due to risk factors including, but not limited to, adoption, speculation, technology, security, and regulation.</h2>
+<h2>- You understand that anyone can create fake versions of existing tokens and tokens that falsely claim to represent DAOs, projects, and acknowledge and accept the risk that You may mistakenly trade those or other tokens.&nbsp;</h2>
+<h2>- You understand that smart contract transactions automatically execute and settle, and that blockchain-based transactions are irreversible when confirmed.&nbsp;</h2>
+<h2>- You acknowledge and accept that the cost and speed of transacting with cryptographic and blockchain-based systems such as Ethereum are variable and may increase dramatically at any time.</h2>
+<h2>- You acknowledge that we are not responsible for any of these variables or risks, do not own or control the protocol, and cannot be held liable for any resulting losses that You experience while accessing or using MetaFi&rsquo;s Services.</h2>
+<p>- You understand and agree that MetaFi is not a stablecoin issuer and that GUSD is a receipt token built via smart contract code that aggregates stablecoins and programmatically allocates the deposits into a smart-contract lending protocol in order to generate yield. There are risks to any deposits into any lending protocol and you must complete your own due diligence to ascertain if you want to take this risk.</p>
+<h2>- You understand and agree to assume full responsibility for all of the risks of accessing and using MetaFi&rsquo;s Services.</h2>
+<h2>- You understand that we do not own or control any of the underlying software through which blockchain networks are formed. In general, the software underlying blockchain networks, including the Ethereum blockchain, is open source, such that anyone can use, copy, modify, and distribute it.</h2>
+<h2>By using MetaFi&rsquo;s Services, You acknowledge and agree, that:</h2>
+<h2>- MetaFi is not responsible for the operation of the blockchain-based software and networks underlying the MetaFi&rsquo;s Platform;</h2>
+<h2>- there exists no guarantee of the functionality, security, or availability of that software and networks;</h2>
+<h2>- and anybody may develop a patch or upgrade the source code without prior authorization of anyone else on the underlying blockchain-based network. The acceptance of potential future patches or upgrades by a significant, but not overwhelming, percentage of the users could result in a &ldquo;fork&rdquo; in the underlying blockchain-based network, and, consequently, the operation of two separate networks will remain separate until the forked blockchains are merged. The temporary or permanent existence of forked blockchains could adversely impact MetaFi&rsquo;s Services. While such a fork in the blockchain could possibly be resolved by community-led efforts to merge the forked blockchains, the success is not guaranteed and could take a long period of time to achieve.</h2>
+<h2>- You understand that blockchain networks use public and private key cryptography.</h2>
+<h2>- You alone are responsible for securing your private key(s). We do not have access to your private key(s). Losing control of your private key(s) will permanently and irreversibly deny You access to digital assets on the Ethereum blockchain or other blockchain based network. If your private key(s) are lost, then You will not be able to transfer your digital assets to any other blockchain address or wallet. If this occurs, then You will not be able to realize any value or utility from the digital assets that You may hold.</h2>
+<h2>- You understand that our Services and your digital assets could be impacted by one or more regulatory inquiries or regulatory actions, which could impede or limit the ability to continue providing our Services.</h2>
+<h2>- You acknowledge that the cost of transacting on the Ethereum blockchain is variable and may increase at any time causing impact to any activities taking place on the Ethereum blockchain, which may result in price fluctuations or increased costs when using MetaFi&rsquo;s Services.</h2>
+<h2>- You use MetaFi&rsquo;s Services at your own risk. You acknowledge that MetaFi&rsquo;s Platform could be subject to flaws and that You are solely responsible for evaluating any output provided by MetaFi&rsquo;s Platform.</h2>
+<h2>- You acknowledge that the information available on MetaFi&rsquo;s Platform may not always be entirely accurate, complete, or current and may also include technical inaccuracies or typographical errors. To continue to provide You with as complete and accurate information as possible, information may be changed or updated from time to time without notice, including information regarding our policies. Accordingly, You should verify all information before relying on it, and all decisions based on information contained on or as part of MetaFi interface are your sole responsibility. No representation is made as to the accuracy, completeness, or appropriateness for any particular purpose of any information distributed via or otherwise when using MetaFi&rsquo;s Platform.</h2>
+<h2>- By using MetaFi&rsquo;s Services, You represent and warrant that You have been, are, and will be solely responsible for making your independent appraisal and investigations into the risks of a given transaction and the underlying digital assets, including smart contracts. You represent that You have sufficient knowledge, market sophistication, professional advice, and experience to make your evaluation of the merits and risks of any transaction conducted in connection with MetaFi or any digital asset.</h2>
+<h2>- You accept all consequences of using all MetaFi&rsquo;s Services, including the risk that You may lose access to your digital assets indefinitely. All transaction decisions are made solely by You. Notwithstanding anything in these Terms, we accept no responsibility whatsoever for and will in no circumstances be liable to You in connection with, the use of the Platform or any other MetaFi&rsquo;s Services, including but not limited to performing digital asset transactions, and entering into smart contracts.</h2>
+<h2>- You understand that You are responsible for transactions You execute, including any erroneous orders that may be filled. We do not take any action to resolve erroneous trades that result from your errors.</h2>
+<h2>- You hereby acknowledge and agree that we will have no responsibility or liability for the risks set forth in this Section or inherent to the use of MetaFi&rsquo;s Services.</h2>
+<h2>- You hereby irrevocably waive, release, and discharge all claims, whether known or unknown to You, against us and our shareholders, members, directors, officers, employees, agents, and representatives, suppliers, and contractors related to any of the risks set forth in this Section or inherent to the use of MetaFi&rsquo;s Services.</h2>
+<h2>- You understand and acknowledge that before You use MetaFi&rsquo;s Services, You should be familiar with any rules or laws relevant to the Services provided.&nbsp;</h2>
+<h2>- You should obtain independent advice about the different types of services available in both your home jurisdiction and other relevant jurisdictions before You start using MetaFi&rsquo;s Services. If your country of residence imposes restrictions on digital assets, we may be required to discontinue your access to MetaFi&rsquo;s Platform. We may not be permitted to transfer digital assets or permit the transfer of digital assets because of a judicial or administrative order or regulatory environment.&nbsp;</h2>
+<h2>- You are responsible for all taxes in respect of any gains obtained by using MetaFi&rsquo;s Services. Before using our Services, You should understand the tax implications of acquiring, entering into, holding and disposing of a digital asset. You should consult your independent tax advisor to understand the relevant tax implications of your activities.</h2>
+<h2>&zwj;<strong>YOU UNDERSTAND THAT THE USE OF METAFI IS EXPOSED TO REGULATORY AND LEGAL RISK, AND THAT THE REGULATORY FRAMEWORK OF DIGITAL ASSETS MAY CHANGE OR VARY ACCORDING TO EACH JURISDICTION. THE EFFECT OF REGULATORY LEGAL RISK MAY AFFECT THE VALUE OF ANY DIGITAL ASSET. THE LAWS OF VARIOUS JURISDICTIONS MAY APPLY TO DIGITAL ASSETS. APPLYING THESE LAWS AND REGULATIONS TO DIGITAL ASSETS IS UNTESTED, AND LAWS AND REGULATIONS ARE SUBJECT TO CHANGE WITHOUT PRIOR NOTICE. AS A RESULT OF REGULATION AND LEGISLATION AROUND DIGITAL ASSETS, METAFI MAY BECOME OR NOT BE AVAILABLE IN CERTAIN JURISDICTIONS.</strong></h2>
+<h2><strong>Prohibited activities</strong></h2>
+<h2>You agree not to engage in, or attempt to engage in, any of the following categories of prohibited activities in connection to your access and use of MetaFi&rsquo;s Services. Specifically, activities that:</h2>
+<h2>- infringe on or violates any copyright, trademark, service mark, patent, right of publicity, right of privacy, or other proprietary or intellectual property rights under any law or jurisdiction;</h2>
+<h2>- seek to interfere with or compromise the integrity, security, or proper functioning of any computer, server, network, personal device, or other information technology system, including (but not limited to) the deployment of viruses and denial of service attacks (so-called &ldquo;bots&rdquo;, &ldquo;hacks&rdquo;, &ldquo;change VPN&rdquo; or &ldquo;cheats&rdquo;), nor promote their use towards third parties;</h2>
+<h2>- seek to defraud MetaFi or any other individual or entity, including (but not limited to) providing any false, inaccurate, or misleading information in order to unlawfully obtain the property of another;</h2>
+<h2>- violate any applicable law, rule, or regulation concerning the integrity of capital markets;</h2>
+<h2>- violate any applicable law, rule, or regulation concerning the trading of securities or derivatives, including (but not limited to) the unregistered offering of securities and the offering of leveraged and margin commodity products to retail or professional investors in any applicable jurisdiction; and</h2>
+<h2>- violate any applicable law, rule, or regulation in any jurisdiction, including (but not limited to) the financial regulatory requirements.</h2>
+<h2>MetaFi provides the Services solely for the use in accordance with these Terms. Only the official Platform provided by MetaFi may be used to connect to the Services offered by us. You must not create, support, host, link or provide any other options, which can be used by another person to use the Services.</h2>
+<h2>You may not add elements to the Services or to change, delete or modify in any other manner any Service elements without the prior written consent of MetaFi. In particular, You are not allowed to copy, remove or otherwise utilize any graphic elements or to try to decompile the source code of the Services provided.</h2>
+<h2>You agree that in conjunction with your use of the Services You will not make finance any unlawful or inappropriate content in accordance with the applicable laws.</h2>
+<h2>You agree that in conjunction with your use of the Services, You will maintain safe and appropriate contact with any third party, if any, and other people in the real world. You will not harass, threaten or otherwise violate the legal rights of others. If You have a dispute with any third party relating to your use of Services, You release MetaFi (and its officers, directors, agents, subsidiaries, joint ventures, and employees) from all claims, demands, and damages (actual and consequential) of every kind and nature, known and unknown, suspected and unsuspected, disclosed and undisclosed, arising out of or in any way connected with such disputes.</h2>
+<h2>Although MetaFi is not obligated to monitor access to or use of the Services, but it may have the right or the duty to do so for the purpose of operating the Services, to ensure compliance with these Terms, and to comply with applicable law or other legal requirements. MetaFi reserves the right to remove or disable access to any Services, at any time and without notice. MetaFi has the right to investigate violations of these Terms or conduct that affects the Services. MetaFi may also consult and cooperate with law enforcement authorities to prosecute users and others who violate the law.</h2>
+<h2><strong>Non-Custodial</strong></h2>
+<h2>The Services are non-custodial. When You deposit digital assets into any smart contract, You retain control over those digital assets at all times. The private key associated with the Ethereum address from which You transfer digital assets is the only private key that can control the digital assets You transfer into the smart contracts. You may withdraw digital assets from any smart contract only to the Ethereum address from which You deposited the digital assets. Specifically, You are the sole responsible for the custody of the cryptographic private keys to the digital asset wallets You hold to access and use our Services.&nbsp;</h2>
+<h2>To the fullest extent permitted by law, You acknowledge and agree that these Terms do not create or impose any fiduciary duties on MetaFi, its affiliates and any third parties related to the Services. Specifically, MetaFi owes no fiduciary duties or liabilities to You or any other party, and that to the extent any such duties or liabilities may exist at law or in equity, those duties and liabilities are hereby irrevocably disclaimed, waived, and eliminated.</h2>
+<h2>You further agree that the only duties and obligations that MetaFi owes You are those set out expressly in these Terms.</h2>
+<h2><strong>Privacy</strong></h2>
+<h2>In order to provide You with the Services, You acknowledge and agree that MetaFi may collect, store and process your personal data and/or information. By accessing and/or using the Services, You have read, understood, and accepted the terms of MetaFi&rsquo;s Privacy Policy, and You acknowledge and agree that MetaFi may use such data and/or information in accordance with the terms and conditions of its Privacy Policy and its Cookie Policy.</h2>
+<h2><strong>Modification of this Terms and Suspension of the Services</strong></h2>
+<h2>MetaFi will make reasonable efforts to keep the Services operational. However, to the extent permissible under applicable law MetaFi reserves the right, in its sole discretion, from time to time, without prior notice, to modify, suspend or disable, temporarily or permanently, the Services including the Platform, in whole or in part, for any reason whatsoever, including but not limited to security incidents, interruptions, modifications or discontinuations of the Services, regulatory restrictions, national or international court rulings and national competent authority orders.&nbsp;</h2>
+<h2>MeteaFi will not be liable for any losses suffered resulting from any modification or from any suspension or termination of the Services.</h2>
+<h2><strong>Indemnification</strong></h2>
+<h2>To the fullest extent permitted under applicable laws, You will defend, indemnify, and hold MetaFi harmless, including MetaFi Labs AG, its affiliates, and MetaFi&rsquo;s affiliates and the respective shareholders, members, directors, officers, employees, attorneys, agents, representatives, suppliers and contractors (collectively, &ldquo;<strong>Indemnified Parties</strong>&rdquo;) from any claim, demand, lawsuit, action, proceeding, investigation, liability, damage, loss, cost or expense, including without limitation reasonable attorneys&rsquo; fees, arising out of or relating to:&nbsp;</h2>
+<h2>- your use of, or conduct in connection with MetaFi&rsquo;s Services;&nbsp;</h2>
+<h2>- Ethereum blockchain assets associated with your Ethereum address;</h2>
+<h2>- any feedback or user content You provide to MetaFi, if any;&nbsp;</h2>
+<h2>- your violation of these Terms;</h2>
+<h2>- or your infringement or misappropriation of the rights of any other person or entity.</h2>
+<h2>If You are obliged to indemnify any Indemnified Party, we will have the right, in our sole discretion, to control any action or proceeding and to determine whether we wish to settle, and if so, on what terms.</h2>
+<h2><strong>Limitation of Liability&nbsp;</strong></h2>
+<h2>Under no circumstances shall MetaFi, its shareholders, partners, subsidiaries, members, directors, officers, employees, attorneys, agents, representatives, suppliers and contractors be liable for any direct or indirect loss or damage arising out of or related to your use of the Services including, without limitation, the following cases: (i) interruptions, malfunctions, or other technical failures of the Services; (ii) data loss; (iii) unavailability, inaccuracy, incompleteness, unreliability, non-update of the Services or of data, metadata, events (including those related to smart contracts), information, signals, insights or other third-party content, services, or goods that may be linked to the Services; (iv) delays, errors, or interruptions in the transmission or delivery of the Service; (v) hacking, misuse, tampering, or other unauthorized access or use including but not limited to viruses, worms, trojan horses, time bombs, cancelbots, spiders, malware or other types of malicious code that may be used to affect the functionality or operation of MetaFi&rsquo;s Services; (vi) &ldquo;phishing&rdquo; or other websites, platforms or apps impersonating MetaFi; or (vii) loss of business or reputation; (viii) any execution or settlement of a transaction, distribution of any token, any performance or non-performance of MetaFi&rsquo;s Platform or any third-party services or information, whether in relation to contractual or non-contractual actions, regardless of whether such damages were foreseeable and even if MetaFi was advised of the possibility of such damages.</h2>
+<h2>In no event shall MetaFi&rsquo;s liability arising out of or related to these Terms and/or the Services exceed the amount paid by You, if any, for the use of the Services.</h2>
+<h2>The Services provided by MetaFi to You are offered &ldquo;as is&rdquo; and MetaFi excludes all conditions, terms, representations, and warranties, express or implied, regarding the Services, including but not limited to: (i) merchantability or fitness for a particular purpose; (ii) non-infringement of laws; (iii) the information provided as part of the Services; (iv) any results derived from the Services. Moreover, MetaFi excludes any condition, express or implied warranty, term, representation regarding the correctness, quality, completeness, update accuracy, reliability, security, performance, completeness, timeliness, or continuous availability of the Services and/or the information related to them. Furthermore, although the Services are in continuous testing and improvement, MetaFi cannot guarantee that there will be no errors in connection with them.</h2>
+<h2>The above limitations of liability shall not apply where MetaFi, or an employee of MetaFi, has caused damage with intent or gross negligence. In any case, these limitations of liability shall apply to the fullest extent permitted by law.</h2>
+<h2><strong>Termination</strong></h2>
+<h2>These Terms are concluded for an unspecified time unless otherwise agreed in writing.</h2>
+<h2>MetaFi may terminate these Terms or suspend the Services or your access to the Platform at any time, including, without limitation, in the event of your alleged or actual misuse of the Services or breach of these Terms.</h2>
+<h2>To the fullest extent permitted under applicable laws, the provisions of these Terms will survive any termination of your access to MetaFi&rsquo;s Services, regardless of the reasons for its expiration or termination.</h2>
+<h2><strong>MISCELLANEOUS</strong></h2>
+<h2>These Terms constitute all the terms and conditions agreed upon between You and MetaFi and supersede any prior agreements in relation to the subject matter of these Terms, whether written or oral.</h2>
+<h2>Unless as otherwise stated in these Terms, should any provision of these Terms be held totally or partially invalid or unenforceable, such invalidity or unenforceability shall not in any manner affect or render invalid or unenforceable the remaining provisions of these Terms, and the application of that provision shall be enforced to the extent permitted by applicable laws. The failure of MetaFi to exercise or enforce any of the rights or provisions of these Terms shall not be considered as a waiver of MetaFi&rsquo;s rights to do so.</h2>
+<h2>MetaFi may assign these Terms and/or delegate any of its obligations hereunder, in whole or in part. You may not assign these Terms or any part of them, nor transfer or sub-license your rights under these Terms to any third party.</h2>
+<h2>MetaFi will not be deemed in default of these Terms to the extent that performance of its obligations is delayed or prevented by reason of any external force including, without limitation, war, insurrections, bank failures, strikes, fires, floods, earthquakes, labour disputes, epidemics, governmental regulations, freight embargoes, natural disaster, act of government or any other cause beyond MetaFi&rsquo;s reasonable control.</h2>
+<h2><strong>Governing Law and Jurisdiction</strong></h2>
+<h2>These Terms shall be governed by and construed in accordance with the laws of Switzerland.&nbsp;</h2>
+<h2>Any disputes arising out of or in connection with these Terms shall be subject to the exclusive jurisdiction of the courts of Zug, Switzerland.&nbsp;</h2>
       </div>
     </main>
   );

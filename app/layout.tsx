@@ -79,7 +79,6 @@ export const metadata: Metadata = {
     description: "A better onchain dollar.",
     images: ["/opengraph.jpeg"],
   },
-  themeColor: "#3F79FF",
   keywords: [
     "defi",
     "stablecoin",
@@ -100,6 +99,10 @@ export const metadata: Metadata = {
       { rel: "shortcut icon", url: "/Icon.svg" },
     ],
   },
+};
+
+export const viewport = {
+  themeColor: "#3F79FF",
 };
 
 export default async function RootLayout({

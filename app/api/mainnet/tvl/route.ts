@@ -140,21 +140,21 @@ const readVaultBreakdown = async () => {
     BigInt(0),
   );
 
-  const percentScale = 1_000_000n; // percent with 4 decimal places
   const breakdown = vaultData.map((item) => {
-    const scaledPercent = totalNormalized
-      ? (item.normalized * percentScale) / totalNormalized
-      : 0n;
-    const percentNumber = Number(scaledPercent) / 10_000;
-    const percentRounded = Number((scaledPercent + 5_000n) / 10_000n);
-    const percentFormatted = `${percentRounded}%`;
+    const half = totalNormalized / BigInt(2);
+    const percentRounded = totalNormalized
+      ? (item.normalized * BigInt(100) + half) / totalNormalized
+      : BigInt(0);
+    const percentNumber = totalNormalized
+      ? Number(item.normalized) / Number(totalNormalized)
+      : 0;
+    const percentFormatted = `${percentRounded.toString()}%`;
 
     if (DEBUG_TVL) {
       console.log("[tvl] percent", {
         symbol: item.symbol,
-        scaledPercent: scaledPercent.toString(),
         percent: percentNumber,
-        percentRounded,
+        percentRounded: percentRounded.toString(),
         totalNormalized: totalNormalized.toString(),
       });
     }

@@ -48,7 +48,7 @@ export function Footer() {
             href="mailto:generic@generic.money"
             className="transition-colors hover:text-foreground"
           >
-            generic@generic.money
+            Reach out
           </a>
           <a href="/terms-and-conditions" className="transition-colors hover:text-foreground">
             Terms &amp; Conditions

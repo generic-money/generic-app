@@ -6,7 +6,7 @@ export default function TermsOfServicePage() {
       </h1>
       <div className="mt-6 space-y-4 text-sm leading-7 text-muted-foreground">
         <p>
-          This page will contain the full Terms of Service for Aragon’s
+          This page will contain the full Terms of Service for Generic’s
           platforms and services. It will describe eligibility, acceptable use,
           risk disclosures, and limitations of liability.
         </p>

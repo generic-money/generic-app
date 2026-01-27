@@ -450,9 +450,7 @@ export function DepositSwap() {
   const [stakeAmountTouched, setStakeAmountTouched] = useState(false);
   const [stakeMode, setStakeMode] = useState<"stake" | "unstake">("stake");
   const [unstakeAmount, setUnstakeAmount] = useState("");
-  const [unstakeStep, setUnstakeStep] = useState<"idle" | "submitting">(
-    "idle",
-  );
+  const [unstakeStep, setUnstakeStep] = useState<"idle" | "submitting">("idle");
   const [pendingStakeAmount, setPendingStakeAmount] = useState<bigint | null>(
     null,
   );
@@ -983,7 +981,10 @@ export function DepositSwap() {
   });
   const unstakePreviewText =
     unstakePreviewGusd != null && citreaGusdDecimals != null
-      ? formatTokenAmount(formatUnits(unstakePreviewGusd, citreaGusdDecimals), 6)
+      ? formatTokenAmount(
+          formatUnits(unstakePreviewGusd, citreaGusdDecimals),
+          6,
+        )
       : "—";
   const stakeBalanceText = formatTokenBalanceText(
     citreaGusdBalance,
@@ -2545,7 +2546,9 @@ export function DepositSwap() {
               {showStakeActionButton ? (
                 <button
                   type="button"
-                  onClick={isStakeMode ? handleStakeAction : handleUnstakeAction}
+                  onClick={
+                    isStakeMode ? handleStakeAction : handleUnstakeAction
+                  }
                   disabled={activeStakeButtonState.disabled}
                   className="h-11 rounded-xl bg-gradient-to-r from-primary via-primary/90 to-primary/95 text-sm font-semibold text-primary-foreground transition hover:from-primary/90 hover:via-primary/80 hover:to-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60"
                 >

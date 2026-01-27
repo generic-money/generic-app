@@ -1,5 +1,4 @@
 import {
-  ArrowDown,
   ArrowUpRight,
   BadgeCheck,
   Coins,
@@ -47,15 +46,6 @@ export default function HomePage() {
       <section className="relative flex min-h-screen w-full items-start pb-16 pt-28 md:pt-32">
         <DepositSwap />
         <DepositSidebar className="pointer-events-auto absolute right-0 top-1/2 hidden -translate-y-1/2 lg:flex" />
-        <div className="absolute inset-x-0 bottom-12 flex justify-center">
-          <a
-            href="#protocol-insights"
-            aria-label="Scroll to protocol insights"
-            className="group flex h-12 w-12 items-center justify-center rounded-full border border-border/70 bg-background/80 shadow-sm backdrop-blur transition hover:-translate-y-0.5 hover:border-primary/30 hover:bg-background hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-          >
-            <ArrowDown className="h-6 w-6 text-muted-foreground transition group-hover:text-foreground" />
-          </a>
-        </div>
       </section>
       <section
         id="protocol-insights"

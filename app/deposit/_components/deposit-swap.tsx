@@ -2254,7 +2254,7 @@ export function DepositSwap() {
 
   return (
     <div id="deposit" className="w-full px-6 md:px-8">
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-10">
+      <div className="mx-auto flex w-full max-w-4xl flex-col gap-8">
         <div className="hidden -mt-20 space-y-4 text-center md:block">
           <span className="text-xs font-semibold uppercase tracking-[0.4em] text-muted-foreground">
             Generic Money
@@ -2266,7 +2266,7 @@ export function DepositSwap() {
             Fully onchain, liquid, yield-generating, (soon) private
           </p>
         </div>
-        <fieldset className="mt-2 space-y-4 md:mt-20">
+        <fieldset className="mt-2 space-y-4 md:mt-10">
           <legend className="sr-only">Opportunity selection</legend>
           <div className="grid justify-items-center gap-3 md:grid-cols-2">
             {OPPORTUNITY_OPTIONS.filter(
@@ -2398,11 +2398,6 @@ export function DepositSwap() {
                       />
                     </button>
                   </div>
-                  {hasCitreaStakePosition ? (
-                    <p className="mt-3 text-[11px] font-medium text-muted-foreground">
-                      Position detected — staking panel unlocked.
-                    </p>
-                  ) : null}
                 </div>
               ) : null}
               {postMintHref &&

@@ -17,18 +17,19 @@ const TRUST_ITEMS = [
   {
     title: "Audit by Cantina",
     description: "Read the report",
-    href: "https://www.generic.money/whitepaper.pdf",
+    href: "https://docs.generic.money/audits/2026-01-19-report-cantinacode-generic-money.pdf",
     icon: ShieldCheck,
   },
   {
     title: "Risk by Steakhouse",
     description: "DeFi-native risk management",
+    href: "https://www.steakhouse.financial/",
     icon: BadgeCheck,
   },
   {
     title: "Proof of Reserves",
     description: "Live transparency",
-    href: "https://generic-analytics.vercel.app/",
+    href: "https://reserves.generic.money",
     icon: LineChart,
   },
 ];
@@ -36,7 +37,7 @@ const TRUST_ITEMS = [
 export default function HomePage() {
   return (
     <main className="flex flex-col">
-      <section className="relative flex min-h-screen w-full items-center pb-24 pt-16 md:pt-20">
+      <section className="relative flex min-h-screen w-full items-start pb-16 pt-28 md:pt-32">
         <DepositSwap />
         <DepositSidebar className="pointer-events-auto absolute right-0 top-1/2 hidden -translate-y-1/2 lg:flex" />
         <div className="absolute inset-x-0 bottom-12 flex justify-center">
@@ -108,14 +109,16 @@ export default function HomePage() {
                       Announcement
                       <ArrowUpRight className="h-4 w-4" />
                     </a>
-                    <Link
-                      href="/documentation"
+                    <a
+                      href="https://hub.status.network/pre-deposits"
+                      target="_blank"
+                      rel="noopener noreferrer"
                       className="inline-flex items-center gap-2 text-sm font-medium text-foreground/70 transition hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                      aria-label="Open strategies"
+                      aria-label="Open Status pre-deposits"
                     >
                       Strategies
                       <ArrowUpRight className="h-4 w-4" />
-                    </Link>
+                    </a>
                   </div>
                 </div>
               </div>
@@ -165,11 +168,11 @@ export default function HomePage() {
                       <ArrowUpRight className="h-4 w-4" />
                     </a>
                     <Link
-                      href="/documentation"
-                      className="inline-flex items-center gap-2 text-sm font-medium text-foreground/70 transition hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                      aria-label="Open strategies"
+                      href="/#citrea"
+                      className="inline-flex items-center gap-2 text-sm font-semibold text-primary transition hover:text-primary/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                      aria-label="Stake sGUSD"
                     >
-                      Strategies
+                      Stake sGUSD
                       <ArrowUpRight className="h-4 w-4" />
                     </Link>
                   </div>

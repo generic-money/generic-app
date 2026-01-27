@@ -39,8 +39,11 @@ export const getOpportunityHref = (route: OpportunityRoute) => {
     /\/+$/,
     "",
   );
-  const path =
-    route === "citrea" ? "/citrea" : route === "predeposit" ? "/status" : null;
+  if (route === "predeposit") {
+    return "https://hub.status.network/pre-deposits";
+  }
+
+  const path = route === "citrea" ? "/citrea" : null;
 
   if (!path) {
     return null;

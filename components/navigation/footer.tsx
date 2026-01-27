@@ -29,7 +29,7 @@ export function Footer() {
         </a>
         <nav className="flex items-center gap-6">
           <a
-            href="https://github.com/MetaFi-Labs/generic-protocol"
+            href="https://github.com/generic-money"
             target="_blank"
             rel="noopener noreferrer"
             className="transition-colors hover:text-foreground"

@@ -2372,7 +2372,7 @@ export function DepositSwap() {
                   <div className="flex items-center justify-between gap-4">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-                        Stake after bridge
+                        Stake
                       </p>
                       <p className="text-xs text-muted-foreground">
                         Automatically stake Citrea GUSD when funds arrive.
@@ -2458,10 +2458,10 @@ export function DepositSwap() {
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted-foreground">
-                      Citrea staking
+                      GUSD staking
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      Deposit Citrea GUSD into the vault to earn yield.
+                      Deposit Citrea GUSD into the staking vault to earn yield.
                     </p>
                   </div>
                   <div className="flex flex-col items-end gap-2">

@@ -60,8 +60,8 @@ export default function HomePage() {
               Protocol insights
             </h2>
             <p className="max-w-2xl text-sm text-muted-foreground md:text-base">
-              Track liquidity, launch readiness, and mint status before you
-              deploy capital.
+              GUSD is fully collateralised on Ethereum and accessible across
+              ecosystems.
             </p>
           </header>
           <div className="grid gap-4 md:grid-cols-2">

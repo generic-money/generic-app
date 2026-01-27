@@ -1623,8 +1623,13 @@ export function DepositSwap() {
         setBridgeStakeState("waiting");
       }
 
+      if (isCitreaDeposit) {
+        setStakeAfterBridge(true);
+        setStakeMode("stake");
+      }
+
       const opportunityHref = getOpportunityHref(routeAtSubmit);
-      if (opportunityHref) {
+      if (opportunityHref && routeAtSubmit !== "citrea") {
         setPostMintHref(opportunityHref);
       }
 

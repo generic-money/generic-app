@@ -88,21 +88,13 @@ export default function HomePage() {
                   unlock at launch — no penalties
                 </p>
                 <div className="mt-auto space-y-3">
-                  <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="grid gap-3">
                     <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5">
                       <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground">
                         Up to
                       </p>
                       <p className="mt-1 text-lg font-bold text-foreground">
                         {OPPORTUNITY_APY_CAP.predeposit} APY
-                      </p>
-                    </div>
-                    <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5">
-                      <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground">
-                        TVL
-                      </p>
-                      <p className="mt-1 text-lg font-bold text-foreground">
-                        $—
                       </p>
                     </div>
                   </div>
@@ -137,10 +129,10 @@ export default function HomePage() {
                 <div className="flex items-start justify-between gap-4">
                   <div className="space-y-2">
                     <span className="inline-flex w-fit items-center rounded-full border border-border/60 bg-background/70 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Citrea GUSD
+                      Citrea staking
                     </span>
                     <h3 className="text-lg font-semibold">
-                      Citrea GUSD for Bitcoin DeFi
+                      sGUSD vault on Citrea
                     </h3>
                   </div>
                   <span className="flex h-10 w-10 items-center justify-center rounded-full border border-border/60 bg-background/80 text-primary shadow-sm">
@@ -148,25 +140,17 @@ export default function HomePage() {
                   </span>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Bitcoin-first chain for OGs. Bring DeFi liquidity to Bitcoin
-                  with Citrea-native GUSD
+                  Stake Citrea GUSD into the vault to mint sGUSD and earn yield
+                  on Bitcoin DeFi liquidity
                 </p>
                 <div className="mt-auto space-y-3">
-                  <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="grid gap-3">
                     <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5">
                       <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground">
                         Up to
                       </p>
                       <p className="mt-1 text-lg font-bold text-foreground">
                         {OPPORTUNITY_APY_CAP.citrea} APY
-                      </p>
-                    </div>
-                    <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5">
-                      <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground">
-                        TVL
-                      </p>
-                      <p className="mt-1 text-lg font-bold text-foreground">
-                        $—
                       </p>
                     </div>
                   </div>
@@ -216,21 +200,13 @@ export default function HomePage() {
                   extra steps
                 </p>
                 <div className="mt-auto space-y-3">
-                  <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="grid gap-3">
                     <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5">
                       <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground">
                         Up to
                       </p>
                       <p className="mt-1 text-lg font-bold text-foreground">
                         {OPPORTUNITY_APY_CAP.mainnet} APY
-                      </p>
-                    </div>
-                    <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5">
-                      <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground">
-                        TVL
-                      </p>
-                      <p className="mt-1 text-lg font-bold text-foreground">
-                        $—
                       </p>
                     </div>
                   </div>

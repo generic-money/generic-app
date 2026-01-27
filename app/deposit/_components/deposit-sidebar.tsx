@@ -523,9 +523,10 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
 
   const handleSelectOpportunity = (
     route: "mainnet" | "predeposit" | "citrea",
+    nextFlow: "deposit" | "redeem" = "deposit",
   ) => {
     setRoute(route);
-    setFlow("deposit");
+    setFlow(nextFlow);
     scrollToDeposit();
   };
 
@@ -652,10 +653,12 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
                     <div className="flex shrink-0 flex-col items-end">
                       <button
                         type="button"
-                        onClick={() => handleSelectOpportunity("mainnet")}
+                        onClick={() =>
+                          handleSelectOpportunity("mainnet", "redeem")
+                        }
                         className="rounded-full border border-border/60 bg-background/70 px-3 py-1 text-[11px] font-semibold text-foreground/80 transition hover:border-primary/30 hover:bg-background hover:text-foreground"
                       >
-                        Mint
+                        Redeem
                       </button>
                     </div>
                   </div>

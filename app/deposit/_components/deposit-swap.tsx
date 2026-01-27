@@ -11,9 +11,11 @@ import {
   useState,
 } from "react";
 import {
+  createPublicClient,
   erc20Abi,
   erc4626Abi,
   formatUnits,
+  http,
   type PublicClient,
   parseUnits,
 } from "viem";
@@ -175,6 +177,8 @@ const LZ_EID_CITREA = 30403;
 const LZ_RECEIVE_GAS = 250_000;
 const LZ_RECEIVE_VALUE = BigInt(0);
 const CITREA_NATIVE_DROP = parseUnits("0.000025", 18);
+const CITREA_NATIVE_BALANCE_THRESHOLD = BigInt(250_000);
+const CITREA_RPC_URL = "https://rpc.mainnet.citrea.xyz";
 const ENABLE_LZ_LOGS = process.env.NODE_ENV !== "production";
 const BRIDGE_COORDINATOR_L2_ADDRESS =
   "0x6E810122C2B7d474Ef568bdf221ec05f2dC8063A" as const satisfies HexAddress;
@@ -483,12 +487,24 @@ export function DepositSwap() {
   const [stakePanelShifted, setStakePanelShifted] = useState(false);
   const [stakePanelVisible, setStakePanelVisible] = useState(false);
   const [lzBridgeRecords, setLzBridgeRecords] = useState<LzBridgeRecord[]>([]);
+  const [citreaNativeBalance, setCitreaNativeBalance] = useState<bigint | null>(
+    null,
+  );
+  const [isCitreaNativeBalanceLoading, setIsCitreaNativeBalanceLoading] =
+    useState(false);
+  const [isCitreaNativeBalanceError, setIsCitreaNativeBalanceError] =
+    useState(false);
+  const citreaClient = useMemo(
+    () => createPublicClient({ transport: http(CITREA_RPC_URL) }),
+    [],
+  );
 
   useEffect(() => {
     if (!stablecoins.find((coin) => coin.ticker === selectedTicker)) {
       setSelectedTicker(stablecoins[0]?.ticker ?? "USDC");
     }
   }, [selectedTicker, stablecoins]);
+
 
   const selectedStablecoin = useMemo(
     () =>
@@ -565,6 +581,45 @@ export function DepositSwap() {
   const isCitreaDeposit = isDepositFlow && depositRoute === "citrea";
   const isPredepositDeposit = isDepositFlow && depositRoute === "predeposit";
   const isNonMainnetDeposit = isDepositFlow && depositRoute !== "mainnet";
+
+  useEffect(() => {
+    let cancelled = false;
+    const shouldFetch = Boolean(accountAddress && isCitreaDeposit);
+
+    if (!shouldFetch) {
+      setCitreaNativeBalance(null);
+      setIsCitreaNativeBalanceLoading(false);
+      setIsCitreaNativeBalanceError(false);
+      return;
+    }
+
+    setIsCitreaNativeBalanceLoading(true);
+    setIsCitreaNativeBalanceError(false);
+
+    citreaClient
+      .getBalance({ address: accountAddress as HexAddress })
+      .then((balance) => {
+        if (cancelled) {
+          return;
+        }
+        setCitreaNativeBalance(balance);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.error("Citrea native balance fetch error", error);
+          setIsCitreaNativeBalanceError(true);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsCitreaNativeBalanceLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accountAddress, citreaClient, isCitreaDeposit]);
 
   const depositorAddress = getGenericDepositorAddress(chainName);
   const genericUnitTokenAddress = getGenericUnitTokenAddress(chainName);
@@ -784,6 +839,14 @@ export function DepositSwap() {
   const finalToBalanceText = statusPredepositBalanceText ?? toBalanceText;
   const canUseMax =
     Boolean(accountAddress) && Boolean(fromBalanceHook.data?.formatted);
+  const isCitreaNativeBalancePending =
+    isCitreaDeposit &&
+    !isCitreaNativeBalanceError &&
+    citreaNativeBalance == null;
+  const shouldUseCitreaNativeDrop =
+    citreaNativeBalance == null
+      ? true
+      : citreaNativeBalance < CITREA_NATIVE_BALANCE_THRESHOLD;
 
   const handleMaxClick = () => {
     const value = fromBalanceHook.data?.formatted;
@@ -1305,6 +1368,10 @@ export function DepositSwap() {
       };
     }
 
+    if (isCitreaDeposit && isCitreaNativeBalancePending) {
+      return { label: "Checking Citrea gas…", disabled: true };
+    }
+
     if (isDepositFlow) {
       if (!depositorAddress) {
         return { label: "Depositor unavailable", disabled: true };
@@ -1369,6 +1436,8 @@ export function DepositSwap() {
     depositorAddress,
     gusdAddress,
     genericUnitTokenAddress,
+    isCitreaNativeBalancePending,
+    isCitreaDeposit,
     isCitreaReturnFlow,
     isDepositFlow,
     isOnMainnet,
@@ -1526,6 +1595,9 @@ export function DepositSwap() {
     ) {
       return;
     }
+    if (isCitreaDeposit && isCitreaNativeBalancePending) {
+      return;
+    }
 
     setTxError(null);
     setPostMintHref(null);
@@ -1582,7 +1654,9 @@ export function DepositSwap() {
           setCitreaBalanceBaseline(stakeBalanceValue ?? ZERO_AMOUNT);
         }
         const remoteRecipient = toBytes32(accountAddress);
-        const bridgeParams = buildCitreaBridgeParams(remoteRecipient);
+        const bridgeParams = shouldUseCitreaNativeDrop
+          ? buildCitreaBridgeParams(remoteRecipient)
+          : CITREA_BRIDGE_PARAMS;
         const sender = toBytes32(accountAddress);
         const sourceWhitelabel = toBytes32(l1GusdAddress as HexBytes);
         const destinationWhitelabel = CITREA_WHITELABEL;

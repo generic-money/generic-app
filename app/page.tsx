@@ -73,9 +73,6 @@ export default function HomePage() {
               <div className="relative flex h-full flex-col gap-4">
                 <div className="flex items-start justify-between gap-4">
                   <div className="space-y-2">
-                    <span className="inline-flex w-fit items-center rounded-full border border-border/60 bg-background/70 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Citrea staking
-                    </span>
                     <h3 className="text-lg font-semibold">
                       sGUSD vault on Citrea
                     </h3>
@@ -86,6 +83,7 @@ export default function HomePage() {
                 </div>
                 <p className="text-sm text-muted-foreground">
                   Stake Citrea GUSD to mint sGUSD and share in Citrea yield.
+                  Returns scale with bridged yield and total Citrea staking.
                 </p>
                 <div className="mt-auto space-y-3">
                   <div className="grid gap-3">
@@ -94,13 +92,13 @@ export default function HomePage() {
                         Projected APY
                       </p>
                       <p className="mt-1 text-lg font-bold text-foreground">
-                        {OPPORTUNITY_APY_CAP.citrea}
+                        Targeting XX%
                       </p>
                     </div>
                     <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5 text-xs text-muted-foreground">
                       <div className="space-y-2">
                         <p>
-                          APY reflects Generic’s Citrea bridge yield and total
+                          APY model: Generic’s Citrea bridge yield and total
                           GUSD staked on Citrea.
                         </p>
                         <p>
@@ -115,7 +113,7 @@ export default function HomePage() {
                       href="https://x.com/genericmoney"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 text-sm font-medium text-foreground/70 transition hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                      className="inline-flex items-center gap-2 text-sm font-medium text-foreground/60 transition hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                     >
                       Announcement
                       <ArrowUpRight className="h-4 w-4" />
@@ -140,9 +138,6 @@ export default function HomePage() {
               <div className="relative flex h-full flex-col gap-4">
                 <div className="flex items-start justify-between gap-4">
                   <div className="space-y-2">
-                    <span className="inline-flex w-fit items-center rounded-full border border-border/60 bg-background/70 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Status GUSD
-                    </span>
                     <h3 className="text-lg font-semibold">
                       Status L2 predeposit vault
                     </h3>

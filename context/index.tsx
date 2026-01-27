@@ -53,6 +53,9 @@ const init = () => {
     features: {
       analytics: true,
     },
+    // TODO: replace placeholder policy content once final copy is ready.
+    termsConditionsUrl: `${window.location.origin}/terms-and-conditions`,
+    privacyPolicyUrl: `${window.location.origin}/privacy-policy`,
     themeMode: "light",
     themeVariables: {
       "--w3m-accent": "#0a0b0d",

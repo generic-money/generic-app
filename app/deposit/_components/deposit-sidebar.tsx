@@ -64,7 +64,7 @@ const CITREA_RPC_URL = "https://rpc.mainnet.citrea.xyz";
 const CITREA_WHITELABEL_ADDRESS =
   "0xAC8c1AEB584765DB16ac3e08D4736CFcE198589B" as const satisfies HexAddress;
 const CITREA_VAULT_ADDRESS =
-  "0x5cA6Cb90b9E30B701a6036537f7576FAD1f247E9" as const satisfies HexAddress;
+  "0x4Fb03AfE959394DB9C4E312A89C6e485FB3732d1" as const satisfies HexAddress;
 
 const formatTokenBalance = (balance: BalanceLike, accountAddress?: string) => {
   if (!accountAddress) {

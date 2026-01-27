@@ -21,6 +21,7 @@ const MAINNET_VAULTS = [
 const DECIMALS = 18;
 
 const RPC_URLS = [process.env.MAINNET_RPC_URL].filter(Boolean) as string[];
+const DEBUG_TVL = process.env.TVL_DEBUG === "true";
 
 const unitAbi = [
   {
@@ -114,6 +115,17 @@ const readVaultBreakdown = async () => {
       const scale = BigInt(10) ** BigInt(18 - Number(decimals));
       const normalized = totalAssets * scale;
 
+      if (DEBUG_TVL) {
+        console.log("[tvl] vault", {
+          symbol: vault.symbol,
+          vault: vault.address,
+          asset,
+          decimals: Number(decimals),
+          totalAssets: totalAssets.toString(),
+          normalized: normalized.toString(),
+        });
+      }
+
       return {
         symbol: vault.symbol,
         totalAssets,
@@ -128,13 +140,29 @@ const readVaultBreakdown = async () => {
     BigInt(0),
   );
 
+  const percentScale = 1_000_000n; // percent with 4 decimal places
   const breakdown = vaultData.map((item) => {
-    const percent = totalNormalized
-      ? Number(item.normalized) / Number(totalNormalized)
-      : 0;
+    const scaledPercent = totalNormalized
+      ? (item.normalized * percentScale) / totalNormalized
+      : 0n;
+    const percentNumber = Number(scaledPercent) / 10_000;
+    const percentRounded = Number((scaledPercent + 5_000n) / 10_000n);
+    const percentFormatted = `${percentRounded}%`;
+
+    if (DEBUG_TVL) {
+      console.log("[tvl] percent", {
+        symbol: item.symbol,
+        scaledPercent: scaledPercent.toString(),
+        percent: percentNumber,
+        percentRounded,
+        totalNormalized: totalNormalized.toString(),
+      });
+    }
+
     return {
       symbol: item.symbol,
-      percent,
+      percent: percentNumber,
+      percentFormatted,
     };
   });
 
@@ -158,7 +186,7 @@ export async function GET() {
     breakdown: breakdown.map((item) => ({
       symbol: item.symbol,
       percent: item.percent,
-      percentFormatted: `${(item.percent * 100).toFixed(2)}%`,
+      percentFormatted: item.percentFormatted,
     })),
   });
 

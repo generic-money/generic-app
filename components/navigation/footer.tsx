@@ -45,10 +45,13 @@ export function Footer() {
             X
           </a>
           <a
-            href="mailto:partners@generic.money"
+            href="mailto:generic@generic.money"
             className="transition-colors hover:text-foreground"
           >
-            Reach out
+            generic@generic.money
+          </a>
+          <a href="/terms-and-conditions" className="transition-colors hover:text-foreground">
+            Terms &amp; Conditions
           </a>
         </nav>
       </div>

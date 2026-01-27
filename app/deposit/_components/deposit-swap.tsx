@@ -1,5 +1,6 @@
 "use client";
 
+import { Options } from "@layerzerolabs/lz-v2-utilities";
 import { ArrowUpDown } from "lucide-react";
 import Image from "next/image";
 import {
@@ -171,6 +172,9 @@ const CITREA_CHAIN_ID = BigInt(CITREA_CHAIN_ID_NUMBER);
 const L1_CHAIN_ID = BigInt(1);
 const LZ_EID_ETHEREUM = 30101;
 const LZ_EID_CITREA = 30403;
+const LZ_RECEIVE_GAS = 250_000;
+const LZ_RECEIVE_VALUE = BigInt(0);
+const CITREA_NATIVE_DROP = parseUnits("0.000025", 18);
 const ENABLE_LZ_LOGS = process.env.NODE_ENV !== "production";
 const BRIDGE_COORDINATOR_L2_ADDRESS =
   "0x6E810122C2B7d474Ef568bdf221ec05f2dC8063A" as const satisfies HexAddress;
@@ -188,6 +192,12 @@ const CITREA_WHITELABEL =
 const CITREA_VAULT_ADDRESS =
   "0x4Fb03AfE959394DB9C4E312A89C6e485FB3732d1" as const satisfies HexAddress;
 const CITREA_BRIDGE_PARAMS = "0x" as const satisfies HexData;
+
+const buildCitreaBridgeParams = (receiver: HexBytes) =>
+  Options.newOptions()
+    .addExecutorLzReceiveOption(LZ_RECEIVE_GAS, LZ_RECEIVE_VALUE)
+    .addExecutorNativeDropOption(CITREA_NATIVE_DROP, receiver)
+    .toHex() as HexData;
 
 const toBytes32 = (value: HexBytes) =>
   `0x${value.slice(2).padStart(64, "0")}` as const;
@@ -1572,6 +1582,7 @@ export function DepositSwap() {
           setCitreaBalanceBaseline(stakeBalanceValue ?? ZERO_AMOUNT);
         }
         const remoteRecipient = toBytes32(accountAddress);
+        const bridgeParams = buildCitreaBridgeParams(remoteRecipient);
         const sender = toBytes32(accountAddress);
         const sourceWhitelabel = toBytes32(l1GusdAddress as HexBytes);
         const destinationWhitelabel = CITREA_WHITELABEL;
@@ -1580,7 +1591,7 @@ export function DepositSwap() {
           bridgeCoordinatorAddress: BRIDGE_COORDINATOR_L1_ADDRESS,
           adapterAddress: LZ_ADAPTER_L1_ADDRESS,
           destinationChainId: CITREA_CHAIN_ID,
-          bridgeParams: CITREA_BRIDGE_PARAMS,
+          bridgeParams,
           message: {
             sender,
             recipient: remoteRecipient,
@@ -1606,7 +1617,7 @@ export function DepositSwap() {
             CITREA_CHAIN_ID,
             remoteRecipient,
             CITREA_WHITELABEL,
-            CITREA_BRIDGE_PARAMS,
+            bridgeParams,
           ],
           value: nativeFee,
         });
@@ -1622,7 +1633,7 @@ export function DepositSwap() {
             CITREA_CHAIN_ID,
             remoteRecipient,
             CITREA_WHITELABEL,
-            CITREA_BRIDGE_PARAMS,
+            bridgeParams,
           ],
           value: nativeFee,
         });
@@ -1647,7 +1658,7 @@ export function DepositSwap() {
         console.info("Deposit & bridge tx sent", {
           hash: depositHash,
           route: "citrea",
-          bridgeParams: CITREA_BRIDGE_PARAMS,
+          bridgeParams,
         });
       } else if (isPredepositDeposit) {
         if (!stablecoinAddress || !predepositChainNickname) {

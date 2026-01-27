@@ -12,6 +12,7 @@
     "test:watch": "vitest --watch"
   },
   "dependencies": {
+    "@layerzerolabs/lz-v2-utilities": "^3.0.156",
     "@radix-ui/react-icons": "^1.3.2",
     "@radix-ui/react-select": "^2.2.6",
     "@reown/appkit": "^1.8.15",

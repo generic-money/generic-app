@@ -352,6 +352,10 @@ const OpportunityCard = ({
   const style = {
     "--opportunity-color": optionTone.primary,
   } as CSSProperties;
+  const apyLabel =
+    option.value === "citrea"
+      ? `Projected APY · ${OPPORTUNITY_APY_CAP.citrea}`
+      : `Up to ${OPPORTUNITY_APY_CAP[option.value]} APY`;
 
   return (
     <label
@@ -391,7 +395,7 @@ const OpportunityCard = ({
         </div>
         <div className="mt-auto flex items-center justify-between text-[11px] font-semibold text-foreground/70">
           <span className="whitespace-nowrap rounded-full border border-border/60 bg-background/70 px-2.5 py-0.5">
-            Up to {OPPORTUNITY_APY_CAP[option.value]} APY
+            {apyLabel}
           </span>
           <span className="whitespace-nowrap text-muted-foreground">
             {option.note}

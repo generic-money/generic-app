@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import * as React from "react";
 
 import { Button } from "@/components/ui/button";
+import { WalletButton } from "@/components/navigation/wallet-button";
 import { cn } from "@/lib/utils";
 
 export interface NavbarLink {
@@ -202,7 +203,7 @@ export const Navbar = React.forwardRef<HTMLElement, NavbarProps>(
           )}
 
           <div className="flex items-center gap-3">
-            <appkit-button />
+            <WalletButton />
           </div>
         </div>
 

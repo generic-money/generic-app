@@ -29,8 +29,8 @@ export const OPPORTUNITY_THEME: Record<OpportunityRoute, OpportunityTheme> = {
 };
 
 export const OPPORTUNITY_APY_CAP: Record<OpportunityRoute, string> = {
-  citrea: "—%",
-  predeposit: "—%",
+  citrea: "TBA",
+  predeposit: "~110%",
   mainnet: "5%",
 };
 

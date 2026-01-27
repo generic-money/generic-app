@@ -52,6 +52,7 @@ const init = () => {
     },
     features: {
       analytics: true,
+      legalCheckbox: true,
     },
     // TODO: replace placeholder policy content once final copy is ready.
     termsConditionsUrl: `${window.location.origin}/terms-and-conditions`,

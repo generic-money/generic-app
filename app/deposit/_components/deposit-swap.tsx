@@ -2591,7 +2591,7 @@ export function DepositSwap() {
                         Stake
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        Automatically stake Citrea GUSD when funds arrive.
+                        Stake Citrea GUSD when funds arrive.
                       </p>
                     </div>
                     <button

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { toast } from "sonner";
 
 export type AlertType = "success" | "info" | "warning" | "error";
@@ -5,7 +6,7 @@ export type AlertType = "success" | "info" | "warning" | "error";
 export type AlertPayload = {
   type: AlertType;
   title?: string;
-  message?: string;
+  message?: ReactNode;
   duration?: number;
 };
 

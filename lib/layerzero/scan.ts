@@ -15,11 +15,13 @@ export type LzBridgeRecord = {
   statusMessage?: string;
   guid?: string;
   updatedAt?: number;
+  finalizedAt?: number;
 };
 
 const STORAGE_KEY = "generic.layerzero.messages";
 const SCAN_BASE_URL = "https://scan.layerzero-api.com/v1";
-const RECORD_TTL_MS = 10 * 60 * 1000;
+const MAX_PENDING_TTL_MS = 10 * 60 * 1000;
+const FINAL_DISPLAY_MS = 15 * 1000;
 
 const FINAL_STATUSES = new Set([
   "DELIVERED",
@@ -41,9 +43,15 @@ export const pruneLzBridgeRecords = (
   records: LzBridgeRecord[],
   now = Date.now(),
 ) => {
-  const next = records.filter(
-    (record) => now - record.createdAt < RECORD_TTL_MS,
-  );
+  const next = records.filter((record) => {
+    if (isFinalLzStatus(record.status)) {
+      const finalizedAt =
+        record.finalizedAt ?? record.updatedAt ?? record.createdAt;
+      return now - finalizedAt < FINAL_DISPLAY_MS;
+    }
+
+    return now - record.createdAt < MAX_PENDING_TTL_MS;
+  });
   return next.length === records.length ? records : next;
 };
 
@@ -56,8 +64,23 @@ export const loadLzBridgeRecords = (): LzBridgeRecord[] => {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     const parsed = raw ? (JSON.parse(raw) as LzBridgeRecord[]) : [];
     const records = Array.isArray(parsed) ? parsed : [];
-    const pruned = pruneLzBridgeRecords(records);
-    if (pruned.length !== records.length) {
+    let normalized = records;
+
+    records.forEach((record, index) => {
+      if (!isFinalLzStatus(record.status) || record.finalizedAt != null) {
+        return;
+      }
+      if (normalized === records) {
+        normalized = [...records];
+      }
+      normalized[index] = {
+        ...record,
+        finalizedAt: record.updatedAt ?? record.createdAt,
+      };
+    });
+
+    const pruned = pruneLzBridgeRecords(normalized);
+    if (pruned !== records) {
       saveLzBridgeRecords(pruned);
     }
     return pruned;

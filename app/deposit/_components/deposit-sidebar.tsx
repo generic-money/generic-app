@@ -21,6 +21,8 @@ import {
   isFinalLzStatus,
   type LzBridgeRecord,
   loadLzBridgeRecords,
+  pruneLzBridgeRecords,
+  saveLzBridgeRecords,
 } from "@/lib/layerzero/scan";
 import { gusd } from "@/lib/models/tokens";
 import { type HexAddress, ZERO_ADDRESS } from "@/lib/types/address";
@@ -60,6 +62,8 @@ type BalanceLike = {
 
 const POSITION_PRECISION = 4;
 const USD_PRECISION = 2;
+const BRIDGE_ETA_MS = 4 * 60 * 1000 + 30 * 1000;
+const FINAL_DISPLAY_MS = 15 * 1000;
 const CITREA_RPC_URL = "https://rpc.mainnet.citrea.xyz";
 const CITREA_WHITELABEL_ADDRESS =
   "0xAC8c1AEB584765DB16ac3e08D4736CFcE198589B" as const satisfies HexAddress;
@@ -106,6 +110,13 @@ const formatUsdFromToken = (amount: bigint, decimals: number | null) => {
   );
 };
 
+const formatDuration = (ms: number) => {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+};
+
 export function DepositSidebar({ className }: DepositSidebarProps = {}) {
   const [open, setOpen] = useState(false);
   const { address: accountAddress } = useAccount();
@@ -135,6 +146,7 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
   const [isCitreaVaultLoading, setIsCitreaVaultLoading] = useState(false);
   const [isCitreaVaultError, setIsCitreaVaultError] = useState(false);
   const [lzBridgeRecords, setLzBridgeRecords] = useState<LzBridgeRecord[]>([]);
+  const [now, setNow] = useState(() => Date.now());
   const citreaFetchEnabled = Boolean(
     accountAddress && CITREA_WHITELABEL_ADDRESS,
   );
@@ -328,6 +340,24 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
     };
   }, []);
 
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+
+    return () => window.clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    setLzBridgeRecords((current) => {
+      const pruned = pruneLzBridgeRecords(current, now);
+      if (pruned !== current) {
+        saveLzBridgeRecords(pruned);
+      }
+      return pruned;
+    });
+  }, [now]);
+
   const citreaBalanceValue = useMemo(() => {
     if (!accountAddress) {
       return "—";
@@ -403,29 +433,39 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
     isCitreaVaultLoading,
   ]);
   const hasCitreaVaultBalance = (citreaVaultBalance ?? BigInt(0)) > BigInt(0);
-  const pendingBridgeRecords = useMemo(() => {
+  const bridgeRecords = useMemo(() => {
     if (!accountAddress) {
       return [];
     }
 
     return lzBridgeRecords.filter(
       (record) =>
-        record.account.toLowerCase() === accountAddress.toLowerCase() &&
-        !isFinalLzStatus(record.status),
+        record.account.toLowerCase() === accountAddress.toLowerCase(),
     );
   }, [accountAddress, lzBridgeRecords]);
-  const pendingBridgeItems = pendingBridgeRecords.map((record) => ({
-    key: `${record.txHash}-${record.direction}`,
-    txHash: record.txHash,
-    directionLabel:
-      record.direction === "l1-to-citrea"
-        ? "Ethereum → Citrea"
-        : "Citrea → Ethereum",
-    statusLabel: (record.status ?? "pending")
+  const pendingBridgeItems = bridgeRecords.map((record) => {
+    const statusLabel = (record.status ?? "pending")
       .replace(/_/g, " ")
       .toLowerCase()
-      .replace(/^./, (char) => char.toUpperCase()),
-  }));
+      .replace(/^./, (char) => char.toUpperCase());
+    const isFinal = isFinalLzStatus(record.status);
+    const elapsedMs = Math.max(0, now - record.createdAt);
+    const progress = Math.min(1, elapsedMs / BRIDGE_ETA_MS);
+    const remainingMs = Math.max(0, BRIDGE_ETA_MS - elapsedMs);
+    return {
+      key: `${record.txHash}-${record.direction}`,
+      txHash: record.txHash,
+      directionLabel:
+        record.direction === "l1-to-citrea"
+          ? "Ethereum → Citrea"
+          : "Citrea → Ethereum",
+      statusLabel,
+      isFinal,
+      isDelivered: (record.status ?? "").toUpperCase() === "DELIVERED",
+      progress,
+      remainingMs,
+    };
+  });
 
   const unitTokenValue = useMemo(
     () => formatTokenBalance(unitBalance, accountAddress),
@@ -609,21 +649,51 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
                           <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-foreground/80">
                             {item.directionLabel}
                           </p>
-                          <p className="mt-1 text-[11px] text-muted-foreground">
-                            Status: {item.statusLabel}
-                          </p>
+                          {item.isFinal ? (
+                            <p className="mt-1 text-[11px] text-muted-foreground">
+                              {item.isDelivered
+                                ? "Bridge completed"
+                                : "Bridge failed"}
+                            </p>
+                          ) : (
+                            <p className="mt-1 text-[11px] text-muted-foreground">
+                              Status: {item.statusLabel}
+                            </p>
+                          )}
                         </div>
                         <span className="rounded-full border border-border/60 bg-background/70 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                          Pending
+                          {item.isFinal ? "Complete" : "Pending"}
                         </span>
+                      </div>
+                      <div className="mt-3 space-y-2">
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60">
+                          <div
+                            className="h-full rounded-full bg-primary/80 transition-[width] duration-500"
+                            style={{ width: `${item.progress * 100}%` }}
+                          />
+                        </div>
+                        {!item.isFinal ? (
+                          <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                            {item.remainingMs > 0 ? (
+                              <>
+                                <span>ETA 4:30</span>
+                                <span>
+                                  {formatDuration(item.remainingMs)} left
+                                </span>
+                              </>
+                            ) : (
+                              <span>Taking longer than usual</span>
+                            )}
+                          </div>
+                        ) : null}
                       </div>
                       <a
                         href={`https://layerzeroscan.com/tx/${item.txHash}`}
                         target="_blank"
                         rel="noreferrer"
-                        className="mt-3 inline-flex text-[11px] font-semibold uppercase tracking-[0.22em] text-foreground/80 transition hover:text-foreground"
+                        className="mt-3 inline-flex text-[10px] italic text-muted-foreground transition hover:text-foreground"
                       >
-                        View on LayerZeroScan
+                        View on LayerZero Scan
                       </a>
                     </div>
                   ))}

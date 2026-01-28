@@ -5,6 +5,7 @@ import { ArrowUpDown } from "lucide-react";
 import Image from "next/image";
 import {
   type CSSProperties,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -269,19 +270,42 @@ const estimateLzBridgeFee = async ({
   });
 };
 
-const notifyTxSubmitted = (label: string, hash: HexBytes) => {
+const buildLayerZeroMessage = (hash: HexBytes) => (
+  <span className="inline-flex flex-wrap items-center gap-1.5">
+    <span>Hash {formatTxHash(hash)}</span>
+    <span className="text-muted-foreground">·</span>
+    <a
+      href={`https://layerzeroscan.com/tx/${hash}`}
+      target="_blank"
+      rel="noreferrer"
+      className="font-medium text-foreground underline underline-offset-4"
+    >
+      LayerZeroScan
+    </a>
+  </span>
+);
+
+const notifyTxSubmitted = (
+  label: string,
+  hash: HexBytes,
+  messageOverride?: ReactNode,
+) => {
   pushAlert({
     type: "info",
     title: `${label} submitted`,
-    message: `Hash ${formatTxHash(hash)}`,
+    message: messageOverride ?? `Hash ${formatTxHash(hash)}`,
   });
 };
 
-const notifyTxConfirmed = (label: string, hash: HexBytes) => {
+const notifyTxConfirmed = (
+  label: string,
+  hash: HexBytes,
+  messageOverride?: ReactNode,
+) => {
   pushAlert({
     type: "success",
     title: `${label} confirmed`,
-    message: `Hash ${formatTxHash(hash)}`,
+    message: messageOverride ?? `Hash ${formatTxHash(hash)}`,
   });
 };
 
@@ -815,7 +839,7 @@ export function DepositSwap() {
   useEffect(() => {
     const interval = window.setInterval(() => {
       setLzBridgeRecords((current) => pruneLzBridgeRecords(current));
-    }, 60000);
+    }, 1000);
 
     return () => window.clearInterval(interval);
   }, []);
@@ -1216,19 +1240,26 @@ export function DepositSwap() {
               srcEid: record.srcEid,
               dstEid: record.dstEid,
             });
+            const now = Date.now();
+            const statusName = status.statusName ?? record.status;
+            const finalizedAt =
+              isFinalLzStatus(statusName) && record.finalizedAt == null
+                ? now
+                : record.finalizedAt;
             if (ENABLE_LZ_LOGS) {
               console.info("LZ poll: status fetched", {
                 txHash: record.txHash,
-                status: status.statusName,
+                status: statusName,
                 guid: status.guid,
               });
             }
             return {
               ...record,
-              status: status.statusName ?? record.status,
+              status: statusName,
               statusMessage: status.statusMessage ?? record.statusMessage,
               guid: status.guid ?? record.guid,
-              updatedAt: Date.now(),
+              updatedAt: now,
+              finalizedAt,
             };
           } catch {
             if (ENABLE_LZ_LOGS) {
@@ -1605,6 +1636,7 @@ export function DepositSwap() {
     const routeAtSubmit = depositRoute;
 
     try {
+      let toastMessage: ReactNode | undefined;
       if (depositAllowance < parsedAmount) {
         const approvalToken = stablecoinAddress;
         if (!approvalToken) {
@@ -1711,6 +1743,7 @@ export function DepositSwap() {
           ],
           value: nativeFee,
         });
+        toastMessage = buildLayerZeroMessage(depositHash);
         if (ENABLE_LZ_LOGS) {
           console.info("LZ track: L1→Citrea tx stored", {
             txHash: depositHash,
@@ -1781,9 +1814,9 @@ export function DepositSwap() {
           args: [stablecoinAddress, gusdAddress, parsedAmount],
         });
       }
-      notifyTxSubmitted(depositActionLabel, depositHash);
+      notifyTxSubmitted(depositActionLabel, depositHash, toastMessage);
       await publicClient.waitForTransactionReceipt({ hash: depositHash });
-      notifyTxConfirmed(depositActionLabel, depositHash);
+      notifyTxConfirmed(depositActionLabel, depositHash, toastMessage);
       if (isCitreaDeposit && stakeAfterBridge) {
         // TODO: replace balance polling with LayerZero message status tracking.
         setBridgeStakeState("waiting");
@@ -1942,9 +1975,10 @@ export function DepositSwap() {
           status: "SUBMITTED",
         }),
       );
-      notifyTxSubmitted("Bridge", bridgeHash);
+      const toastMessage = buildLayerZeroMessage(bridgeHash);
+      notifyTxSubmitted("Bridge", bridgeHash, toastMessage);
       await publicClient.waitForTransactionReceipt({ hash: bridgeHash });
-      notifyTxConfirmed("Bridge", bridgeHash);
+      notifyTxConfirmed("Bridge", bridgeHash, toastMessage);
 
       setFromAmount("");
       const balanceRefetches: Promise<unknown>[] = [];

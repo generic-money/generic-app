@@ -42,6 +42,12 @@ export function SwapAssetPanel({
         min="0"
         inputMode="decimal"
         {...inputProps}
+        onWheel={(event) => {
+          if (document.activeElement === event.currentTarget) {
+            event.currentTarget.blur();
+          }
+          inputProps?.onWheel?.(event);
+        }}
         className={cn(
           "h-12 w-full rounded-xl border border-border/80 bg-muted/30 px-4 text-lg font-semibold text-foreground shadow-inner outline-none transition placeholder:text-muted-foreground/60 focus:border-primary/60 focus:bg-background focus:shadow-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60",
           inputProps?.className,

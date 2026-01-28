@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createPublicClient, formatUnits, http } from "viem";
 import { mainnet } from "viem/chains";
+import { withMemoryCache } from "@/lib/memory-cache";
 
 const UNIT_TOKEN: `0x${string}` =
   "0x8c307baDbd78bEa5A1cCF9677caa58e7A2172502";
@@ -19,6 +20,7 @@ const MAINNET_VAULTS = [
   },
 ] as const satisfies ReadonlyArray<{ symbol: string; address: `0x${string}` }>;
 const DECIMALS = 18;
+const TVL_CACHE_TTL_MS = 3_600_000;
 
 const RPC_URLS = [process.env.MAINNET_RPC_URL].filter(Boolean) as string[];
 const DEBUG_TVL = process.env.TVL_DEBUG === "true";
@@ -170,26 +172,38 @@ const readVaultBreakdown = async () => {
 };
 
 export async function GET() {
-  const totalSupply = await readTotalSupply();
-  const breakdown = await readVaultBreakdown();
-  const formatted = formatUnits(totalSupply, DECIMALS);
-  const formattedNumber = Number.parseFloat(formatted);
-  const formattedUsd = Number.isFinite(formattedNumber)
-    ? new Intl.NumberFormat("en-US", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }).format(formattedNumber)
-    : formatted;
-  const response = NextResponse.json({
-    totalSupply: totalSupply.toString(),
-    formatted: formattedUsd,
-    breakdown: breakdown.map((item) => ({
-      symbol: item.symbol,
-      percent: item.percent,
-      percentFormatted: item.percentFormatted,
-    })),
-  });
+  const payload = await withMemoryCache(
+    "mainnet-tvl",
+    { ttlMs: TVL_CACHE_TTL_MS, staleWhileRevalidate: true },
+    async () => {
+      const totalSupply = await readTotalSupply();
+      const breakdown = await readVaultBreakdown();
+      const formatted = formatUnits(totalSupply, DECIMALS);
+      const formattedNumber = Number.parseFloat(formatted);
+      const formattedUsd = Number.isFinite(formattedNumber)
+        ? new Intl.NumberFormat("en-US", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          }).format(formattedNumber)
+        : formatted;
 
-  response.headers.set("Cache-Control", "s-maxage=60, stale-while-revalidate=300");
+      return {
+        totalSupply: totalSupply.toString(),
+        formatted: formattedUsd,
+        breakdown: breakdown.map((item) => ({
+          symbol: item.symbol,
+          percent: item.percent,
+          percentFormatted: item.percentFormatted,
+        })),
+      };
+    },
+  );
+
+  const response = NextResponse.json(payload);
+
+  response.headers.set(
+    "Cache-Control",
+    "s-maxage=3600, stale-while-revalidate=3600",
+  );
   return response;
 }

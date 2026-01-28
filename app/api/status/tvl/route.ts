@@ -5,9 +5,11 @@ import {
   getBridgeCoordinatorAddress,
   getPredepositChainNickname,
 } from "@/lib/constants/predeposit";
+import { withMemoryCache } from "@/lib/memory-cache";
 
 const DECIMALS = 18;
 const RPC_URLS = [process.env.MAINNET_RPC_URL].filter(Boolean) as string[];
+const TVL_CACHE_TTL_MS = 3_600_000;
 
 const bridgeCoordinatorAbi = [
   {
@@ -41,21 +43,32 @@ const readStatusTvl = async () => {
 };
 
 export async function GET() {
-  const totalPredeposits = await readStatusTvl();
-  const formatted = formatUnits(totalPredeposits, DECIMALS);
-  const formattedNumber = Number.parseFloat(formatted);
-  const formattedUsd = Number.isFinite(formattedNumber)
-    ? new Intl.NumberFormat("en-US", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }).format(formattedNumber)
-    : formatted;
+  const payload = await withMemoryCache(
+    "status-tvl",
+    { ttlMs: TVL_CACHE_TTL_MS, staleWhileRevalidate: true },
+    async () => {
+      const totalPredeposits = await readStatusTvl();
+      const formatted = formatUnits(totalPredeposits, DECIMALS);
+      const formattedNumber = Number.parseFloat(formatted);
+      const formattedUsd = Number.isFinite(formattedNumber)
+        ? new Intl.NumberFormat("en-US", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          }).format(formattedNumber)
+        : formatted;
 
-  const response = NextResponse.json({
-    totalPredeposits: totalPredeposits.toString(),
-    formatted: formattedUsd,
-  });
+      return {
+        totalPredeposits: totalPredeposits.toString(),
+        formatted: formattedUsd,
+      };
+    },
+  );
 
-  response.headers.set("Cache-Control", "s-maxage=60, stale-while-revalidate=300");
+  const response = NextResponse.json(payload);
+
+  response.headers.set(
+    "Cache-Control",
+    "s-maxage=3600, stale-while-revalidate=3600",
+  );
   return response;
 }

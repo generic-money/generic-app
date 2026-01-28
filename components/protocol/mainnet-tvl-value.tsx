@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { loadMainnetTvl } from "@/components/protocol/mainnet-tvl-data";
 
 type MainnetTvlValueProps = {
   className?: string;
@@ -12,25 +13,18 @@ export function MainnetTvlValue({ className }: MainnetTvlValueProps) {
   useEffect(() => {
     let active = true;
 
-    const load = async () => {
-      try {
-        const response = await fetch("/api/mainnet/tvl");
-        if (!response.ok) {
-          return;
-        }
-        const data = (await response.json()) as { formatted?: string };
+    void loadMainnetTvl()
+      .then((data) => {
         if (!active) {
           return;
         }
         if (data.formatted) {
           setValue(`$${data.formatted} GUSD`);
         }
-      } catch {
+      })
+      .catch(() => {
         // keep fallback
-      }
-    };
-
-    void load();
+      });
     return () => {
       active = false;
     };

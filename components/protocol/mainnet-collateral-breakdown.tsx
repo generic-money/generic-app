@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { loadMainnetTvl } from "@/components/protocol/mainnet-tvl-data";
 
 const DEFAULT_ITEMS = [
   {
@@ -29,24 +30,16 @@ export function MainnetCollateralBreakdown() {
 
   useEffect(() => {
     let active = true;
-    const load = async () => {
-      try {
-        const response = await fetch("/api/mainnet/tvl");
-        if (!response.ok) {
-          return;
-        }
-        const data = (await response.json()) as {
-          breakdown?: { symbol: string; percentFormatted: string }[];
-        };
+    void loadMainnetTvl()
+      .then((data) => {
         if (!active || !data.breakdown) {
           return;
         }
         setItems(data.breakdown);
-      } catch {
+      })
+      .catch(() => {
         // keep fallback
-      }
-    };
-    void load();
+      });
     return () => {
       active = false;
     };

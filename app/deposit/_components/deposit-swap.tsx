@@ -351,6 +351,7 @@ const OPPORTUNITY_OPTIONS: OpportunityOption[] = [
     eyebrow: "Citrea GUSD",
     title: "Bitcoin's first zk Rollup",
     description: "Access the BTC DeFi layer",
+    badge: `Up to ${OPPORTUNITY_APY_CAP.citrea} APY`,
     note: "L2-native settlement",
     formDescription: "Mint Citrea-native GUSD with stablecoins",
     iconSrc: "/chains/citrea.png",
@@ -791,8 +792,14 @@ export function DepositSwap() {
       setUnstakeError(null);
       setCitreaBalanceBaseline(null);
       setAutoSwitchRequested(false);
+      return;
     }
-  }, [depositRoute]);
+
+    if (isDepositFlow) {
+      setStakeAfterBridge(true);
+      setStakeMode("stake");
+    }
+  }, [depositRoute, isDepositFlow]);
 
   useEffect(() => {
     if (
@@ -2593,6 +2600,9 @@ export function DepositSwap() {
                       <p className="text-xs text-muted-foreground">
                         Stake Citrea GUSD when funds arrive.
                       </p>
+                      <p className="mt-1 text-xs font-semibold text-foreground/80">
+                        APY {OPPORTUNITY_APY_CAP.citrea}
+                      </p>
                     </div>
                     <button
                       type="button"
@@ -2690,7 +2700,7 @@ export function DepositSwap() {
                   </div>
                   <div className="flex flex-col items-end gap-2">
                     <span className="rounded-full border border-border/60 bg-background/80 px-2.5 py-1 text-[11px] font-semibold text-foreground/80">
-                      APY —
+                      APY {OPPORTUNITY_APY_CAP.citrea}
                     </span>
                     <div className="inline-flex rounded-full border border-border/60 bg-background/80 p-1 text-[11px] font-semibold">
                       <button

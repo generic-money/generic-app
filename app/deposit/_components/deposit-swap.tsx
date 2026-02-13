@@ -512,7 +512,7 @@ export function DepositSwap() {
     null,
   );
   const [bridgeStakeState, setBridgeStakeState] = useState<
-    "idle" | "bridging" | "waiting" | "ready" | "staking" | "complete" | "error"
+    "idle" | "bridging" | "waiting" | "ready" | "staking" | "error"
   >("idle");
   const [stakeError, setStakeError] = useState<string | null>(null);
   const [unstakeError, setUnstakeError] = useState<string | null>(null);
@@ -816,7 +816,7 @@ export function DepositSwap() {
       !stakeAfterBridge ||
       stakeMode !== "stake" ||
       stakeAmountTouched ||
-      (bridgeStakeState !== "idle" && bridgeStakeState !== "complete")
+      bridgeStakeState !== "idle"
     ) {
       return;
     }
@@ -1664,10 +1664,6 @@ export function DepositSwap() {
       return { label: "Staking…", disabled: true };
     }
 
-    if (bridgeStakeState === "complete") {
-      return { label: "Staked", disabled: true };
-    }
-
     if (!stakeTargetAmount || stakeTargetAmount <= ZERO_AMOUNT) {
       return { label: "Enter amount", disabled: true };
     }
@@ -2248,7 +2244,7 @@ export function DepositSwap() {
         await publicClient.waitForTransactionReceipt({ hash: stakeHash });
         notifyTxConfirmed("Stake", stakeHash);
 
-        setBridgeStakeState("complete");
+        setBridgeStakeState("idle");
         setPendingStakeAmount(null);
         setAutoStakeFlow(null);
         setAutoSwitchRequested(false);

@@ -148,53 +148,10 @@ export default function ContextProvider({
 
   const pathname = usePathname();
 
-  const [route, setRoute] = React.useState<OpportunityRoute>(() => {
-    if (typeof window === "undefined") {
-      return DEFAULT_OPPORTUNITY_ROUTE;
-    }
-
-    const fromUrl = getOpportunityRouteFromUrl(
-      window.location.pathname,
-      window.location.hash,
-    );
-    if (fromUrl) {
-      return fromUrl;
-    }
-
-    const stored = window.localStorage.getItem(OPPORTUNITY_STORAGE_KEY);
-    if (stored === "citrea" || stored === "predeposit") {
-      return stored;
-    }
-
-    return DEFAULT_OPPORTUNITY_ROUTE;
-  });
-
-  const [flow, setFlow] = React.useState<SwapFlow>(() => {
-    if (typeof window === "undefined") {
-      return "deposit";
-    }
-
-    const fromUrl = getOpportunityRouteFromUrl(
-      window.location.pathname,
-      window.location.hash,
-    );
-
-    if (fromUrl) {
-      return "deposit";
-    }
-
-    const storedRoute = window.localStorage.getItem(OPPORTUNITY_STORAGE_KEY);
-    if (storedRoute === "citrea" || storedRoute === "predeposit") {
-      return "deposit";
-    }
-
-    const storedFlow = window.localStorage.getItem(SWAP_FLOW_STORAGE_KEY);
-    if (storedFlow === "deposit" || storedFlow === "redeem") {
-      return storedFlow;
-    }
-
-    return "deposit";
-  });
+  const [route, setRoute] = React.useState<OpportunityRoute>(
+    DEFAULT_OPPORTUNITY_ROUTE,
+  );
+  const [flow, setFlow] = React.useState<SwapFlow>("deposit");
 
   React.useEffect(() => {
     if (typeof window === "undefined") {
@@ -205,12 +162,24 @@ export default function ContextProvider({
       pathname,
       window.location.hash,
     );
-    if (!routeFromUrl) {
+
+    if (routeFromUrl) {
+      setRoute(routeFromUrl);
+      setFlow("deposit");
       return;
     }
 
-    setRoute(routeFromUrl);
-    setFlow("deposit");
+    const storedRoute = window.localStorage.getItem(OPPORTUNITY_STORAGE_KEY);
+    if (storedRoute === "citrea" || storedRoute === "predeposit") {
+      setRoute(storedRoute);
+      setFlow("deposit");
+      return;
+    }
+
+    const storedFlow = window.localStorage.getItem(SWAP_FLOW_STORAGE_KEY);
+    if (storedFlow === "deposit" || storedFlow === "redeem") {
+      setFlow(storedFlow);
+    }
   }, [pathname]);
 
   React.useEffect(() => {

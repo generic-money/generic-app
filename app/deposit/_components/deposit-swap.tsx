@@ -9,6 +9,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -158,6 +159,14 @@ type BridgeMessage = {
   destinationWhitelabel: HexBytes;
   amount: bigint;
 };
+type AutoStakeFlowState = {
+  active: boolean;
+  baselineBalance: bigint;
+  startedAt: number;
+  requestedAmount: bigint | null;
+  arrivedAmount: bigint | null;
+  sourceTxHash?: HexBytes;
+};
 type TokenBalanceLike = {
   isLoading: boolean;
   isError: boolean;
@@ -181,6 +190,8 @@ const CITREA_NATIVE_DROP = parseUnits("0.000025", 18);
 const CITREA_NATIVE_BALANCE_THRESHOLD = BigInt(250_000);
 const CITREA_RPC_URL = "https://rpc.mainnet.citrea.xyz";
 const ENABLE_LZ_LOGS = process.env.NODE_ENV !== "production";
+const LZ_STATUS_POLL_INTERVAL_MS = 15_000;
+const AUTO_STAKE_WAIT_TIMEOUT_MS = 15 * 60 * 1000;
 const BRIDGE_COORDINATOR_L2_ADDRESS =
   "0x6E810122C2B7d474Ef568bdf221ec05f2dC8063A" as const satisfies HexAddress;
 const BRIDGE_COORDINATOR_L1_ADDRESS = getBridgeCoordinatorAddress(
@@ -505,9 +516,9 @@ export function DepositSwap() {
   >("idle");
   const [stakeError, setStakeError] = useState<string | null>(null);
   const [unstakeError, setUnstakeError] = useState<string | null>(null);
-  const [citreaBalanceBaseline, setCitreaBalanceBaseline] = useState<
-    bigint | null
-  >(null);
+  const [autoStakeFlow, setAutoStakeFlow] = useState<AutoStakeFlowState | null>(
+    null,
+  );
   const [autoSwitchRequested, setAutoSwitchRequested] = useState(false);
   const [stakePanelShifted, setStakePanelShifted] = useState(false);
   const [stakePanelVisible, setStakePanelVisible] = useState(false);
@@ -529,7 +540,6 @@ export function DepositSwap() {
       setSelectedTicker(stablecoins[0]?.ticker ?? "USDC");
     }
   }, [selectedTicker, stablecoins]);
-
 
   const selectedStablecoin = useMemo(
     () =>
@@ -790,7 +800,7 @@ export function DepositSwap() {
       setPendingStakeAmount(null);
       setStakeError(null);
       setUnstakeError(null);
-      setCitreaBalanceBaseline(null);
+      setAutoStakeFlow(null);
       setAutoSwitchRequested(false);
       return;
     }
@@ -1049,6 +1059,12 @@ export function DepositSwap() {
       stakeBalanceValue !== undefined &&
       stakeTargetAmount > stakeBalanceValue,
   );
+  const canFundStakeFromCurrentCitreaBalance = Boolean(
+    stakeTargetAmount &&
+      stakeTargetAmount > ZERO_AMOUNT &&
+      stakeBalanceValue !== undefined &&
+      stakeTargetAmount <= stakeBalanceValue,
+  );
   const unstakeInsufficientBalance = Boolean(
     unstakeParsedAmount &&
       unstakeBalanceValue !== undefined &&
@@ -1141,6 +1157,16 @@ export function DepositSwap() {
         !isFinalLzStatus(record.status),
     );
   }, [accountAddress, lzBridgeRecords]);
+  const pendingLzPollKey = useMemo(
+    () =>
+      pendingLzRecords
+        .map((record) => record.txHash.toLowerCase())
+        .sort()
+        .join("|"),
+    [pendingLzRecords],
+  );
+  const pendingLzRecordsRef = useRef<LzBridgeRecord[]>(pendingLzRecords);
+  const lzStatusPollInFlightRef = useRef(false);
   const pendingL1ToCitrea = pendingLzRecords.find(
     (record) => record.direction === "l1-to-citrea",
   );
@@ -1153,7 +1179,23 @@ export function DepositSwap() {
     Boolean(pendingL1ToCitrea);
   const isStakeAutoBridgeFlow = isCitreaDeposit && stakeAfterBridge;
   const isStakeAutoBridgePending =
-    isStakeAutoBridgeFlow && bridgeStakeState !== "complete";
+    isStakeAutoBridgeFlow &&
+    (bridgeStakeState === "bridging" ||
+      bridgeStakeState === "waiting" ||
+      bridgeStakeState === "ready");
+  const shouldBlockStakeForBridge = Boolean(
+    isStakeAutoBridgePending &&
+      stakeTargetAmount &&
+      stakeTargetAmount > ZERO_AMOUNT &&
+      !canFundStakeFromCurrentCitreaBalance,
+  );
+  const isAutoStakeFlowInProgress = Boolean(
+    autoStakeFlow?.active &&
+      (bridgeStakeState === "bridging" ||
+        bridgeStakeState === "waiting" ||
+        bridgeStakeState === "ready" ||
+        bridgeStakeState === "staking"),
+  );
   const pendingBridgeForRoute = isCitreaReturnFlow
     ? pendingCitreaToL1
     : isCitreaDeposit
@@ -1233,107 +1275,216 @@ export function DepositSwap() {
   }, [bridgeStakeState, citreaGusdBalance]);
 
   useEffect(() => {
-    if (!pendingLzRecords.length) {
+    pendingLzRecordsRef.current = pendingLzRecords;
+  }, [pendingLzRecords]);
+
+  useEffect(() => {
+    if (!pendingLzPollKey) {
+      return;
+    }
+
+    if (!pendingLzRecordsRef.current.length) {
       return;
     }
 
     let cancelled = false;
 
     const pollStatuses = async () => {
-      const updates = await Promise.all(
-        pendingLzRecords.map(async (record) => {
-          try {
-            const status = await fetchLzMessageStatus(record.txHash, {
-              srcEid: record.srcEid,
-              dstEid: record.dstEid,
-            });
-            const now = Date.now();
-            const statusName = status.statusName ?? record.status;
-            const finalizedAt =
-              isFinalLzStatus(statusName) && record.finalizedAt == null
-                ? now
-                : record.finalizedAt;
-            if (ENABLE_LZ_LOGS) {
-              console.info("LZ poll: status fetched", {
-                txHash: record.txHash,
-                status: statusName,
-                guid: status.guid,
-              });
-            }
-            return {
-              ...record,
-              status: statusName,
-              statusMessage: status.statusMessage ?? record.statusMessage,
-              guid: status.guid ?? record.guid,
-              updatedAt: now,
-              finalizedAt,
-            };
-          } catch {
-            if (ENABLE_LZ_LOGS) {
-              console.warn("LZ poll: status fetch failed", {
-                txHash: record.txHash,
-              });
-            }
-            return record;
-          }
-        }),
-      );
-
-      if (cancelled) {
+      if (lzStatusPollInFlightRef.current) {
         return;
       }
 
-      setLzBridgeRecords((current) => {
-        const updateMap = new Map(
-          updates.map((item) => [item.txHash.toLowerCase(), item]),
+      lzStatusPollInFlightRef.current = true;
+
+      try {
+        const records = pendingLzRecordsRef.current;
+        if (!records.length) {
+          return;
+        }
+
+        const updates = await Promise.all(
+          records.map(async (record) => {
+            try {
+              const status = await fetchLzMessageStatus(record.txHash, {
+                srcEid: record.srcEid,
+                dstEid: record.dstEid,
+              });
+              const statusName = status.statusName ?? record.status;
+              const statusMessage =
+                status.statusMessage ?? record.statusMessage;
+              const guid = status.guid ?? record.guid;
+              const statusChanged =
+                statusName !== record.status ||
+                statusMessage !== record.statusMessage ||
+                guid !== record.guid;
+              const shouldFinalizeNow =
+                isFinalLzStatus(statusName) && record.finalizedAt == null;
+
+              if (ENABLE_LZ_LOGS && (statusChanged || shouldFinalizeNow)) {
+                console.info("LZ poll: status fetched", {
+                  txHash: record.txHash,
+                  status: statusName,
+                  guid,
+                });
+              }
+
+              if (!statusChanged && !shouldFinalizeNow) {
+                return {
+                  txHash: record.txHash,
+                  changed: false as const,
+                };
+              }
+
+              const now = Date.now();
+              return {
+                txHash: record.txHash,
+                changed: true as const,
+                status: statusName,
+                statusMessage,
+                guid,
+                updatedAt: now,
+                finalizedAt: shouldFinalizeNow ? now : record.finalizedAt,
+              };
+            } catch {
+              if (ENABLE_LZ_LOGS) {
+                console.warn("LZ poll: status fetch failed", {
+                  txHash: record.txHash,
+                });
+              }
+
+              return {
+                txHash: record.txHash,
+                changed: false as const,
+              };
+            }
+          }),
         );
 
-        if (ENABLE_LZ_LOGS) {
-          current.forEach((record) => {
+        if (cancelled) {
+          return;
+        }
+
+        setLzBridgeRecords((current) => {
+          const changedUpdates = updates.filter((item) => item.changed);
+          if (!changedUpdates.length) {
+            return current;
+          }
+
+          const updateMap = new Map(
+            changedUpdates.map((item) => [item.txHash.toLowerCase(), item]),
+          );
+          let hasChanges = false;
+
+          const next = current.map((record) => {
             const updated = updateMap.get(record.txHash.toLowerCase());
-            if (updated?.status && updated.status !== record.status) {
+            if (!updated) {
+              return record;
+            }
+
+            const nextRecord = {
+              ...record,
+              status: updated.status,
+              statusMessage: updated.statusMessage,
+              guid: updated.guid,
+              updatedAt: updated.updatedAt,
+              finalizedAt: updated.finalizedAt,
+            };
+            const unchanged =
+              nextRecord.status === record.status &&
+              nextRecord.statusMessage === record.statusMessage &&
+              nextRecord.guid === record.guid &&
+              nextRecord.finalizedAt === record.finalizedAt;
+
+            if (unchanged) {
+              return record;
+            }
+
+            if (ENABLE_LZ_LOGS && updated.status !== record.status) {
               console.info("LZ poll: status updated", {
                 txHash: record.txHash,
                 from: record.status ?? "unknown",
                 to: updated.status,
               });
             }
-          });
-        }
 
-        return current.map(
-          (record) => updateMap.get(record.txHash.toLowerCase()) ?? record,
-        );
-      });
+            hasChanges = true;
+            return nextRecord;
+          });
+
+          return hasChanges ? next : current;
+        });
+      } finally {
+        lzStatusPollInFlightRef.current = false;
+      }
     };
 
-    pollStatuses();
-    const interval = window.setInterval(pollStatuses, 15000);
+    void pollStatuses();
+    const interval = window.setInterval(() => {
+      void pollStatuses();
+    }, LZ_STATUS_POLL_INTERVAL_MS);
+
     return () => {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [pendingLzRecords]);
+  }, [pendingLzPollKey]);
 
   useEffect(() => {
     if (
       bridgeStakeState !== "waiting" ||
-      !pendingStakeAmount ||
+      !autoStakeFlow?.active ||
       stakeBalanceValue === undefined
     ) {
       return;
     }
 
-    const baseline = citreaBalanceBaseline ?? ZERO_AMOUNT;
-    if (stakeBalanceValue >= baseline + pendingStakeAmount) {
+    const delta = stakeBalanceValue - autoStakeFlow.baselineBalance;
+    if (delta > ZERO_AMOUNT) {
+      setPendingStakeAmount(delta);
+      setAutoStakeFlow((current) =>
+        current
+          ? {
+              ...current,
+              arrivedAmount: delta,
+            }
+          : current,
+      );
       setBridgeStakeState("ready");
     }
-  }, [
-    bridgeStakeState,
-    citreaBalanceBaseline,
-    pendingStakeAmount,
-    stakeBalanceValue,
-  ]);
+  }, [autoStakeFlow, bridgeStakeState, stakeBalanceValue]);
+
+  useEffect(() => {
+    if (bridgeStakeState !== "waiting" || !autoStakeFlow?.active) {
+      return;
+    }
+
+    const elapsed = Date.now() - autoStakeFlow.startedAt;
+    const remaining = AUTO_STAKE_WAIT_TIMEOUT_MS - elapsed;
+    const timeoutDelay = Math.max(0, remaining);
+
+    const timeoutId = window.setTimeout(() => {
+      setBridgeStakeState((current) =>
+        current === "waiting" ? "error" : current,
+      );
+      setStakeError((current) => {
+        if (current) {
+          return current;
+        }
+
+        return "Bridge is taking longer than expected. You can stake manually once your Citrea balance updates.";
+      });
+      setAutoStakeFlow((current) =>
+        current
+          ? {
+              ...current,
+              active: false,
+            }
+          : current,
+      );
+    }, timeoutDelay);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [autoStakeFlow, bridgeStakeState]);
 
   useEffect(() => {
     if (
@@ -1397,6 +1548,10 @@ export function DepositSwap() {
         return { label: "Bridge failed", disabled: true };
       }
       return { label: "Switch to Citrea", disabled: !switchChainAsync };
+    }
+
+    if (isDepositFlow && isCitreaDeposit && isAutoStakeFlowInProgress) {
+      return { label: "Bridge in progress…", disabled: true };
     }
 
     if (shouldSwitchChain) {
@@ -1478,6 +1633,7 @@ export function DepositSwap() {
     isCitreaDeposit,
     isCitreaReturnFlow,
     isDepositFlow,
+    isAutoStakeFlowInProgress,
     isOnMainnet,
     isNonMainnetDeposit,
     isPredepositRedeem,
@@ -1504,19 +1660,6 @@ export function DepositSwap() {
       return { label: "Connect wallet", disabled: true };
     }
 
-    if (isStakeAutoBridgePending) {
-      return {
-        label: isBridgeToCitreaPending
-          ? "Waiting for bridge…"
-          : "Bridge to stake",
-        disabled: true,
-      };
-    }
-
-    if (isBridgeToCitreaPending) {
-      return { label: "Waiting for bridge…", disabled: true };
-    }
-
     if (bridgeStakeState === "staking") {
       return { label: "Staking…", disabled: true };
     }
@@ -1531,6 +1674,15 @@ export function DepositSwap() {
 
     if (stakeInsufficientBalance) {
       return { label: "Insufficient balance", disabled: true };
+    }
+
+    if (shouldBlockStakeForBridge) {
+      return {
+        label: isBridgeToCitreaPending
+          ? "Waiting for bridge…"
+          : "Bridge to stake",
+        disabled: true,
+      };
     }
 
     if (activeChainId !== CITREA_CHAIN_ID_NUMBER) {
@@ -1551,8 +1703,8 @@ export function DepositSwap() {
     activeChainId,
     bridgeStakeState,
     isBridgeToCitreaPending,
-    isStakeAutoBridgePending,
     needsStakeApproval,
+    shouldBlockStakeForBridge,
     stakeInsufficientBalance,
     stakeTargetAmount,
     switchChainAsync,
@@ -1636,6 +1788,9 @@ export function DepositSwap() {
     if (isCitreaDeposit && isCitreaNativeBalancePending) {
       return;
     }
+    if (isCitreaDeposit && isAutoStakeFlowInProgress) {
+      return;
+    }
 
     setTxError(null);
     setPostMintHref(null);
@@ -1683,14 +1838,21 @@ export function DepositSwap() {
           return;
         }
         if (stakeAfterBridge) {
-          const targetAmount =
+          const requestedAmount =
             stakeParsedAmount && stakeParsedAmount > ZERO_AMOUNT
               ? stakeParsedAmount
-              : parsedAmount;
-          setPendingStakeAmount(targetAmount);
+              : null;
+          setPendingStakeAmount(null);
           setBridgeStakeState("bridging");
           setStakeError(null);
-          setCitreaBalanceBaseline(stakeBalanceValue ?? ZERO_AMOUNT);
+          setAutoStakeFlow({
+            active: true,
+            baselineBalance: stakeBalanceValue ?? ZERO_AMOUNT,
+            startedAt: Date.now(),
+            requestedAmount,
+            arrivedAmount: null,
+          });
+          setAutoSwitchRequested(false);
         }
         const remoteRecipient = toBytes32(accountAddress);
         const bridgeParams = shouldUseCitreaNativeDrop
@@ -1757,6 +1919,16 @@ export function DepositSwap() {
             account: accountAddress,
             amount: parsedAmount.toString(),
           });
+        }
+        if (stakeAfterBridge) {
+          setAutoStakeFlow((current) =>
+            current
+              ? {
+                  ...current,
+                  sourceTxHash: depositHash,
+                }
+              : current,
+          );
         }
         setLzBridgeRecords((current) =>
           upsertLzBridgeRecord(current, {
@@ -1860,6 +2032,14 @@ export function DepositSwap() {
       if (isCitreaDeposit && stakeAfterBridge) {
         setBridgeStakeState("error");
         setStakeError(message);
+        setAutoStakeFlow((current) =>
+          current
+            ? {
+                ...current,
+                active: false,
+              }
+            : current,
+        );
       }
       pushAlert({
         type: "error",
@@ -2070,6 +2250,7 @@ export function DepositSwap() {
 
         setBridgeStakeState("complete");
         setPendingStakeAmount(null);
+        setAutoStakeFlow(null);
         setAutoSwitchRequested(false);
         const refetches: Promise<unknown>[] = [];
         if (citreaGusdBalance.refetch) {
@@ -2086,6 +2267,14 @@ export function DepositSwap() {
           error instanceof Error ? error.message : "Staking failed";
         setStakeError(message);
         setBridgeStakeState("error");
+        setAutoStakeFlow((current) =>
+          current
+            ? {
+                ...current,
+                active: false,
+              }
+            : current,
+        );
         pushAlert({
           type: "error",
           title: "Staking failed",
@@ -2267,6 +2456,10 @@ export function DepositSwap() {
     }
 
     if (isPredepositRedeem) {
+      return;
+    }
+
+    if (isDepositFlow && isCitreaDeposit && isAutoStakeFlowInProgress) {
       return;
     }
 

@@ -48,6 +48,7 @@ import {
   getGenericDepositorAddress,
   getGenericUnitTokenAddress,
 } from "@/lib/constants/contracts";
+import { HIDE_USDC_ON_REDEEM } from "@/lib/constants/feature-flags";
 import {
   getOpportunityHref,
   OPPORTUNITY_APY_CAP,
@@ -473,6 +474,13 @@ export function DepositSwap() {
     () => getStablecoins(stablecoinChainName),
     [stablecoinChainName],
   );
+  const selectableStablecoins = useMemo(() => {
+    if (isDepositFlow || !HIDE_USDC_ON_REDEEM) {
+      return stablecoins;
+    }
+
+    return stablecoins.filter((coin) => coin.ticker !== "USDC");
+  }, [isDepositFlow, stablecoins]);
   const publicClient = usePublicClient({ chainId: activeChainId });
   const mainnetClient = usePublicClient({ chainId: MAINNET_CHAIN_ID });
   const { writeContractAsync } = useWriteContract();
@@ -546,10 +554,10 @@ export function DepositSwap() {
   );
 
   useEffect(() => {
-    if (!stablecoins.find((coin) => coin.ticker === selectedTicker)) {
-      setSelectedTicker(stablecoins[0]?.ticker ?? "USDC");
+    if (!selectableStablecoins.find((coin) => coin.ticker === selectedTicker)) {
+      setSelectedTicker(selectableStablecoins[0]?.ticker ?? "USDC");
     }
-  }, [selectedTicker, stablecoins]);
+  }, [selectedTicker, selectableStablecoins]);
 
   useEffect(() => {
     if (!redeemEntryRequest) {
@@ -576,9 +584,9 @@ export function DepositSwap() {
 
   const selectedStablecoin = useMemo(
     () =>
-      stablecoins.find((coin) => coin.ticker === selectedTicker) ??
-      stablecoins[0],
-    [selectedTicker, stablecoins],
+      selectableStablecoins.find((coin) => coin.ticker === selectedTicker) ??
+      selectableStablecoins[0],
+    [selectedTicker, selectableStablecoins],
   );
 
   const selectedOpportunity = useMemo(
@@ -1705,6 +1713,10 @@ export function DepositSwap() {
         }
       }
     } else {
+      if (!isPredepositRedeem && selectableStablecoins.length === 0) {
+        return { label: "No redeem asset available", disabled: true };
+      }
+
       if (!isGunitRedeem && !gusdAddress) {
         return { label: "GUSD unavailable", disabled: true };
       }
@@ -1759,6 +1771,7 @@ export function DepositSwap() {
     isOnMainnet,
     isNonMainnetDeposit,
     isPredepositRedeem,
+    selectableStablecoins.length,
     needsApproval,
     parsedAmount,
     redeemActionLabel,
@@ -2771,7 +2784,7 @@ export function DepositSwap() {
             />
           </SelectTrigger>
           <SelectContent>
-            {stablecoins.map((coin) => (
+            {selectableStablecoins.map((coin) => (
               <SelectItem
                 key={coin.ticker}
                 value={coin.ticker}

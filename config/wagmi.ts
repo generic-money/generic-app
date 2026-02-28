@@ -1,7 +1,7 @@
 import { type AppKitNetwork, mainnet } from "@reown/appkit/networks";
 import { WagmiAdapter } from "@reown/appkit-adapter-wagmi";
-import { cookieStorage, createStorage } from "@wagmi/core";
 import { defineChain } from "viem";
+import { cookieStorage, createStorage } from "wagmi";
 
 // Get projectId from https://dashboard.reown.com
 const rawProjectId = process.env.NEXT_PUBLIC_PROJECT_ID;

@@ -20,6 +20,14 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Environment Variables
+
+Use `.env.local` for local configuration.
+
+- `NEXT_PUBLIC_PROJECT_ID`: Reown project id.
+- `MAINNET_RPC_URL`: Mainnet RPC URL used by server-side endpoints.
+- `NEXT_PUBLIC_HIDE_USDC_ON_REDEEM`: Feature flag (default `false`). Set to `true` or `1` to hide `USDC` from redemption dropdowns while keeping `USDC` deposits enabled.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

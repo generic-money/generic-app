@@ -10,7 +10,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { createPublicClient, erc20Abi, formatUnits, http } from "viem";
 import { useAccount, useBalance, useReadContract } from "wagmi";
-import { useOpportunityRoute } from "@/context";
+import { type RedeemSource, useOpportunityRoute } from "@/context";
 import { CHAIN_ID_BY_NAME, CHAINS } from "@/lib/constants/chains";
 import { getGenericUnitTokenAddress } from "@/lib/constants/contracts";
 import {
@@ -63,7 +63,6 @@ type BalanceLike = {
 const POSITION_PRECISION = 4;
 const USD_PRECISION = 2;
 const BRIDGE_ETA_MS = 4 * 60 * 1000 + 30 * 1000;
-const FINAL_DISPLAY_MS = 15 * 1000;
 const CITREA_RPC_URL = "https://rpc.mainnet.citrea.xyz";
 const CITREA_WHITELABEL_ADDRESS =
   "0xAC8c1AEB584765DB16ac3e08D4736CFcE198589B" as const satisfies HexAddress;
@@ -120,7 +119,7 @@ const formatDuration = (ms: number) => {
 export function DepositSidebar({ className }: DepositSidebarProps = {}) {
   const [open, setOpen] = useState(false);
   const { address: accountAddress } = useAccount();
-  const { setRoute, setFlow } = useOpportunityRoute();
+  const { setRoute, setFlow, requestRedeemEntry } = useOpportunityRoute();
   const chainName = CHAINS.MAINNET;
   const mainnetChainId = CHAIN_ID_BY_NAME[CHAINS.MAINNET];
   const genericUnitTokenAddress = getGenericUnitTokenAddress(chainName);
@@ -439,8 +438,7 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
     }
 
     return lzBridgeRecords.filter(
-      (record) =>
-        record.account.toLowerCase() === accountAddress.toLowerCase(),
+      (record) => record.account.toLowerCase() === accountAddress.toLowerCase(),
     );
   }, [accountAddress, lzBridgeRecords]);
   const pendingBridgeItems = bridgeRecords.map((record) => {
@@ -552,6 +550,7 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
         hasStatusPredeposit,
         hasCitreaBalance,
         hasCitreaVaultBalance,
+        hasUnits,
       ].filter(Boolean).length
     : 0;
   const showEmptyState = positionsCount === 0;
@@ -564,7 +563,14 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
   const handleSelectOpportunity = (
     route: "mainnet" | "predeposit" | "citrea",
     nextFlow: "deposit" | "redeem" = "deposit",
+    redeemEntry?: {
+      source: RedeemSource;
+      prefill?: "none" | "max";
+    },
   ) => {
+    if (nextFlow === "redeem" && redeemEntry) {
+      requestRedeemEntry(redeemEntry.source, redeemEntry.prefill ?? "none");
+    }
     setRoute(route);
     setFlow(nextFlow);
     scrollToDeposit();
@@ -724,7 +730,10 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
                       <button
                         type="button"
                         onClick={() =>
-                          handleSelectOpportunity("mainnet", "redeem")
+                          handleSelectOpportunity("mainnet", "redeem", {
+                            source: "gusd",
+                            prefill: "none",
+                          })
                         }
                         className="rounded-full border border-border/60 bg-background/70 px-3 py-1 text-[11px] font-semibold text-foreground/80 transition hover:border-primary/30 hover:bg-background hover:text-foreground"
                       >
@@ -825,13 +834,31 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
               ) : null}
 
               {hasUnits ? (
-                <div className="rounded-2xl border border-border/60 bg-background/70 p-4 shadow-sm">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
-                    Vault shares
-                  </p>
-                  <p className="mt-2 text-sm font-semibold text-foreground">
-                    {unitTokenValue}
-                  </p>
+                <div className="rounded-2xl border border-primary/20 bg-primary/10 p-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-foreground/70">
+                        Vault shares
+                      </p>
+                      <p className="mt-2 text-sm font-semibold text-foreground">
+                        {unitTokenValue}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 flex-col items-end">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleSelectOpportunity("mainnet", "redeem", {
+                            source: "gunit",
+                            prefill: "max",
+                          })
+                        }
+                        className="rounded-full border border-border/60 bg-background/70 px-3 py-1 text-[11px] font-semibold text-foreground/80 transition hover:border-primary/30 hover:bg-background hover:text-foreground"
+                      >
+                        Withdraw
+                      </button>
+                    </div>
+                  </div>
                 </div>
               ) : null}
 

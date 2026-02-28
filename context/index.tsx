@@ -78,12 +78,22 @@ type ContextProviderProps = {
 };
 
 type SwapFlow = "deposit" | "redeem";
+export type RedeemSource = "gusd" | "gunit";
+export type RedeemPrefill = "none" | "max";
+
+export type RedeemEntryRequest = {
+  id: number;
+  source: RedeemSource;
+  prefill: RedeemPrefill;
+};
 
 type OpportunityRouteContextValue = {
   route: OpportunityRoute;
   setRoute: (route: OpportunityRoute) => void;
   flow: SwapFlow;
   setFlow: (flow: SwapFlow) => void;
+  redeemEntryRequest: RedeemEntryRequest | null;
+  requestRedeemEntry: (source: RedeemSource, prefill?: RedeemPrefill) => void;
 };
 
 const OPPORTUNITY_STORAGE_KEY = "generic.opportunityRoute";
@@ -152,6 +162,9 @@ export default function ContextProvider({
     DEFAULT_OPPORTUNITY_ROUTE,
   );
   const [flow, setFlow] = React.useState<SwapFlow>("deposit");
+  const [redeemEntryRequest, setRedeemEntryRequest] =
+    React.useState<RedeemEntryRequest | null>(null);
+  const redeemEntryRequestIdRef = React.useRef(0);
 
   React.useEffect(() => {
     if (typeof window === "undefined") {
@@ -222,14 +235,33 @@ export default function ContextProvider({
     window.localStorage.setItem(SWAP_FLOW_STORAGE_KEY, flow);
   }, [flow]);
 
+  const requestRedeemEntry = React.useCallback(
+    (source: RedeemSource, prefill: RedeemPrefill = "none") => {
+      redeemEntryRequestIdRef.current += 1;
+      setRedeemEntryRequest({
+        id: redeemEntryRequestIdRef.current,
+        source,
+        prefill,
+      });
+    },
+    [],
+  );
+
   const initialState = cookieToInitialState(
     wagmiAdapter.wagmiConfig as Config,
     cookies,
   );
 
   const value = React.useMemo(
-    () => ({ route, setRoute, flow, setFlow }),
-    [flow, route],
+    () => ({
+      route,
+      setRoute,
+      flow,
+      setFlow,
+      redeemEntryRequest,
+      requestRedeemEntry,
+    }),
+    [flow, redeemEntryRequest, requestRedeemEntry, route],
   );
 
   return (

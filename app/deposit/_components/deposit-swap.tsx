@@ -41,7 +41,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useOpportunityRoute } from "@/context";
+import { type RedeemSource, useOpportunityRoute } from "@/context";
 import { pushAlert } from "@/lib/alerts";
 import { CHAINS, getChainNameById } from "@/lib/constants/chains";
 import {
@@ -148,7 +148,7 @@ const bridgeCoordinatorPredepositAbi = [
   },
 ] as const;
 
-type AssetType = "stablecoin" | "gusd";
+type AssetType = "stablecoin" | "gusd" | "gunit";
 const ZERO_AMOUNT = BigInt(0);
 type HexBytes = `0x${string}`;
 type HexData = `0x${string}`;
@@ -464,6 +464,7 @@ export function DepositSwap() {
     setRoute: setDepositRoute,
     flow,
     setFlow,
+    redeemEntryRequest,
   } = useOpportunityRoute();
   const isDepositFlow = flow === "deposit";
   const isCitreaReturnFlow = !isDepositFlow && depositRoute === "citrea";
@@ -485,7 +486,15 @@ export function DepositSwap() {
   });
   const [selectedTicker, setSelectedTicker] =
     useState<StablecoinTicker>("USDC");
+  const [redeemSource, setRedeemSource] = useState<RedeemSource>("gusd");
+  const [pendingRedeemMaxPrefill, setPendingRedeemMaxPrefill] = useState<{
+    id: number;
+    source: RedeemSource;
+  } | null>(null);
   const isPredepositRedeem = !isDepositFlow && depositRoute === "predeposit";
+  const isMainnetRedeem =
+    !isDepositFlow && !isCitreaReturnFlow && depositRoute === "mainnet";
+  const isGunitRedeem = isMainnetRedeem && redeemSource === "gunit";
   const isOnMainnet = activeChainId === MAINNET_CHAIN_ID;
   const requiredChainId = isCitreaReturnFlow
     ? isOnMainnet
@@ -526,10 +535,11 @@ export function DepositSwap() {
   const [citreaNativeBalance, setCitreaNativeBalance] = useState<bigint | null>(
     null,
   );
-  const [isCitreaNativeBalanceLoading, setIsCitreaNativeBalanceLoading] =
+  const [_isCitreaNativeBalanceLoading, setIsCitreaNativeBalanceLoading] =
     useState(false);
   const [isCitreaNativeBalanceError, setIsCitreaNativeBalanceError] =
     useState(false);
+  const processedRedeemEntryRequestIdRef = useRef(0);
   const citreaClient = useMemo(
     () => createPublicClient({ transport: http(CITREA_RPC_URL) }),
     [],
@@ -540,6 +550,29 @@ export function DepositSwap() {
       setSelectedTicker(stablecoins[0]?.ticker ?? "USDC");
     }
   }, [selectedTicker, stablecoins]);
+
+  useEffect(() => {
+    if (!redeemEntryRequest) {
+      return;
+    }
+
+    if (redeemEntryRequest.id <= processedRedeemEntryRequestIdRef.current) {
+      return;
+    }
+
+    processedRedeemEntryRequestIdRef.current = redeemEntryRequest.id;
+    setRedeemSource(redeemEntryRequest.source);
+
+    if (redeemEntryRequest.prefill === "max") {
+      setPendingRedeemMaxPrefill({
+        id: redeemEntryRequest.id,
+        source: redeemEntryRequest.source,
+      });
+      return;
+    }
+
+    setPendingRedeemMaxPrefill(null);
+  }, [redeemEntryRequest]);
 
   const selectedStablecoin = useMemo(
     () =>
@@ -561,7 +594,10 @@ export function DepositSwap() {
       ? "Bridge Citrea GUSD back to mainnet, then redeem into your selected stablecoin."
       : isPredepositRedeem
         ? "Status predeposits are locked until launch."
-        : "Redeem GUSD back into your selected stablecoin.";
+        : isGunitRedeem
+          ? "Redeem GUnits back into your selected stablecoin."
+          : "Redeem GUSD back into your selected stablecoin.";
+  const showRedeemSourceSelector = isMainnetRedeem;
 
   const canSwitchDirection = !isDepositFlow || depositRoute !== "predeposit";
 
@@ -579,11 +615,19 @@ export function DepositSwap() {
     setSelectedTicker(value);
   };
 
+  const handleRedeemSourceChange = (nextSource: RedeemSource) => {
+    setPostMintHref(null);
+    setPendingRedeemMaxPrefill(null);
+    setRedeemSource(nextSource);
+  };
+
   const l1GusdAddress = gusd.getAddress(chainName);
   const gusdAddress =
     isCitreaReturnFlow && !isOnMainnet
       ? CITREA_WHITELABEL_ADDRESS
       : l1GusdAddress;
+  const depositorAddress = getGenericDepositorAddress(chainName);
+  const genericUnitTokenAddress = getGenericUnitTokenAddress(chainName);
 
   const stablecoinAddress = selectedStablecoin?.tokenAddress;
   const vaultAddress = selectedStablecoin?.depositVaultAddress as
@@ -604,6 +648,10 @@ export function DepositSwap() {
     stablecoinChainId,
   );
   const { decimals: gusdDecimals } = useErc20Decimals(gusdAddress, gusdChainId);
+  const { decimals: genericUnitDecimals } = useErc20Decimals(
+    genericUnitTokenAddress,
+    MAINNET_CHAIN_ID,
+  );
   const { decimals: citreaGusdDecimals } = useErc20Decimals(
     CITREA_WHITELABEL_ADDRESS,
     CITREA_CHAIN_ID_NUMBER,
@@ -616,6 +664,12 @@ export function DepositSwap() {
   const isCitreaDeposit = isDepositFlow && depositRoute === "citrea";
   const isPredepositDeposit = isDepositFlow && depositRoute === "predeposit";
   const isNonMainnetDeposit = isDepositFlow && depositRoute !== "mainnet";
+
+  useEffect(() => {
+    if (!isMainnetRedeem && redeemSource !== "gusd") {
+      setRedeemSource("gusd");
+    }
+  }, [isMainnetRedeem, redeemSource]);
 
   useEffect(() => {
     let cancelled = false;
@@ -656,8 +710,6 @@ export function DepositSwap() {
     };
   }, [accountAddress, citreaClient, isCitreaDeposit]);
 
-  const depositorAddress = getGenericDepositorAddress(chainName);
-  const genericUnitTokenAddress = getGenericUnitTokenAddress(chainName);
   const statusPredepositChainNickname =
     getPredepositChainNickname("predeposit");
   const predepositChainNickname = isPredepositDeposit
@@ -711,6 +763,19 @@ export function DepositSwap() {
     },
   });
 
+  const genericUnitBalance = useBalance({
+    address: accountAddress,
+    token: genericUnitTokenAddress,
+    chainId: MAINNET_CHAIN_ID,
+    query: {
+      enabled: Boolean(accountAddress && genericUnitTokenAddress),
+    },
+  });
+  const hasGunitBalance =
+    (genericUnitBalance.data?.value ?? ZERO_AMOUNT) > ZERO_AMOUNT;
+  const showGunitRedeemSourceOption =
+    showRedeemSourceSelector && hasGunitBalance;
+
   const gusdMainnetBalance = useBalance({
     address: accountAddress,
     token: l1GusdAddress,
@@ -737,6 +802,15 @@ export function DepositSwap() {
       enabled: Boolean(accountAddress),
     },
   });
+
+  useEffect(() => {
+    if (showGunitRedeemSourceOption || redeemSource !== "gunit") {
+      return;
+    }
+
+    setRedeemSource("gusd");
+    setPendingRedeemMaxPrefill(null);
+  }, [redeemSource, showGunitRedeemSourceOption]);
 
   const statusPredepositBalance = useMemo(() => {
     if (isStatusPredepositLoading) {
@@ -765,16 +839,22 @@ export function DepositSwap() {
     statusPredepositAmount,
   ]);
 
-  const fromAssetType: AssetType = isDepositFlow ? "stablecoin" : "gusd";
+  const fromAssetType: AssetType = isDepositFlow
+    ? "stablecoin"
+    : isGunitRedeem
+      ? "gunit"
+      : "gusd";
 
   const toAssetType: AssetType = isDepositFlow ? "gusd" : "stablecoin";
 
   const fromBalanceHook =
     fromAssetType === "stablecoin"
       ? stablecoinBalance
-      : depositRoute === "predeposit"
-        ? statusPredepositBalance
-        : gusdBalance;
+      : fromAssetType === "gunit"
+        ? genericUnitBalance
+        : depositRoute === "predeposit"
+          ? statusPredepositBalance
+          : gusdBalance;
   const toBalanceHook =
     toAssetType === "stablecoin"
       ? stablecoinBalance
@@ -787,7 +867,7 @@ export function DepositSwap() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset amount when the active asset changes
   useEffect(() => {
     setFromAmount("");
-  }, [selectedTicker, isDepositFlow, depositRoute, chainName]);
+  }, [selectedTicker, isDepositFlow, depositRoute, chainName, redeemSource]);
 
   useEffect(() => {
     if (depositRoute !== "citrea") {
@@ -878,6 +958,41 @@ export function DepositSwap() {
       }).replace(/^Balance:/, "Predeposited:")
     : null;
   const finalToBalanceText = statusPredepositBalanceText ?? toBalanceText;
+  const fromBalanceFormatted = fromBalanceHook.data?.formatted;
+
+  useEffect(() => {
+    if (!pendingRedeemMaxPrefill) {
+      return;
+    }
+
+    if (!isMainnetRedeem || isCitreaReturnFlow) {
+      return;
+    }
+
+    if (pendingRedeemMaxPrefill.source !== redeemSource) {
+      return;
+    }
+
+    if (fromBalanceHook.isError) {
+      setPendingRedeemMaxPrefill(null);
+      return;
+    }
+
+    if (!fromBalanceFormatted) {
+      return;
+    }
+
+    setFromAmount(fromBalanceFormatted);
+    setPendingRedeemMaxPrefill(null);
+  }, [
+    fromBalanceFormatted,
+    fromBalanceHook.isError,
+    isCitreaReturnFlow,
+    isMainnetRedeem,
+    pendingRedeemMaxPrefill,
+    redeemSource,
+  ]);
+
   const canUseMax =
     Boolean(accountAddress) && Boolean(fromBalanceHook.data?.formatted);
   const isCitreaNativeBalancePending =
@@ -917,7 +1032,11 @@ export function DepositSwap() {
   };
 
   const fromDecimals =
-    fromAssetType === "stablecoin" ? stablecoinDecimals : gusdDecimals;
+    fromAssetType === "stablecoin"
+      ? stablecoinDecimals
+      : fromAssetType === "gunit"
+        ? genericUnitDecimals
+        : gusdDecimals;
   const toDecimals =
     toAssetType === "stablecoin" ? stablecoinDecimals : gusdDecimals;
 
@@ -941,7 +1060,9 @@ export function DepositSwap() {
   const fromPlaceholder =
     fromAssetType === "stablecoin"
       ? `Amount in ${selectedStablecoin?.ticker ?? ""}`
-      : "Amount in GUSD";
+      : fromAssetType === "gunit"
+        ? "Amount in GUnits"
+        : "Amount in GUSD";
   const toPlaceholder =
     toAssetType === "stablecoin"
       ? `Amount in ${selectedStablecoin?.ticker ?? ""}`
@@ -1584,7 +1705,7 @@ export function DepositSwap() {
         }
       }
     } else {
-      if (!gusdAddress) {
+      if (!isGunitRedeem && !gusdAddress) {
         return { label: "GUSD unavailable", disabled: true };
       }
 
@@ -1634,6 +1755,7 @@ export function DepositSwap() {
     isCitreaReturnFlow,
     isDepositFlow,
     isAutoStakeFlowInProgress,
+    isGunitRedeem,
     isOnMainnet,
     isNonMainnetDeposit,
     isPredepositRedeem,
@@ -2314,7 +2436,6 @@ export function DepositSwap() {
     if (
       !accountAddress ||
       !vaultAddress ||
-      !gusdAddress ||
       !genericUnitTokenAddress ||
       !parsedAmount ||
       parsedAmount <= ZERO_AMOUNT ||
@@ -2327,43 +2448,51 @@ export function DepositSwap() {
     setPostMintHref(null);
 
     try {
-      const balanceBefore = await publicClient.readContract({
-        abi: erc20Abi,
-        address: genericUnitTokenAddress,
-        functionName: "balanceOf",
-        args: [accountAddress],
-      });
+      let redeemShares = parsedAmount;
 
-      setTxStep("submitting");
-      console.info("Unwrap call", {
-        functionName: "unwrap",
-        address: gusdAddress,
-        chainId: activeChainId,
-        args: [accountAddress, accountAddress, parsedAmount],
-      });
-      const unwrapHash = await writeContractAsync({
-        abi: whitelabeledUnitAbi,
-        address: gusdAddress,
-        chainId: activeChainId,
-        functionName: "unwrap",
-        args: [accountAddress, accountAddress, parsedAmount],
-      });
-      notifyTxSubmitted("Unwrap", unwrapHash);
-      await publicClient.waitForTransactionReceipt({ hash: unwrapHash });
-      notifyTxConfirmed("Unwrap", unwrapHash);
+      if (!isGunitRedeem) {
+        if (!gusdAddress) {
+          return;
+        }
 
-      const balanceAfter = await publicClient.readContract({
-        abi: erc20Abi,
-        address: genericUnitTokenAddress,
-        functionName: "balanceOf",
-        args: [accountAddress],
-      });
-      const redeemShares = balanceAfter - balanceBefore;
-      console.info("Generic unit balance", {
-        before: balanceBefore,
-        after: balanceAfter,
-        delta: redeemShares,
-      });
+        const balanceBefore = await publicClient.readContract({
+          abi: erc20Abi,
+          address: genericUnitTokenAddress,
+          functionName: "balanceOf",
+          args: [accountAddress],
+        });
+
+        setTxStep("submitting");
+        console.info("Unwrap call", {
+          functionName: "unwrap",
+          address: gusdAddress,
+          chainId: activeChainId,
+          args: [accountAddress, accountAddress, parsedAmount],
+        });
+        const unwrapHash = await writeContractAsync({
+          abi: whitelabeledUnitAbi,
+          address: gusdAddress,
+          chainId: activeChainId,
+          functionName: "unwrap",
+          args: [accountAddress, accountAddress, parsedAmount],
+        });
+        notifyTxSubmitted("Unwrap", unwrapHash);
+        await publicClient.waitForTransactionReceipt({ hash: unwrapHash });
+        notifyTxConfirmed("Unwrap", unwrapHash);
+
+        const balanceAfter = await publicClient.readContract({
+          abi: erc20Abi,
+          address: genericUnitTokenAddress,
+          functionName: "balanceOf",
+          args: [accountAddress],
+        });
+        redeemShares = balanceAfter - balanceBefore;
+        console.info("Generic unit balance", {
+          before: balanceBefore,
+          after: balanceAfter,
+          delta: redeemShares,
+        });
+      }
 
       if (redeemShares <= ZERO_AMOUNT) {
         setTxError("No generic unit tokens available to redeem");
@@ -2428,6 +2557,9 @@ export function DepositSwap() {
       }
       if (gusdBalance.refetch) {
         balanceRefetches.push(gusdBalance.refetch());
+      }
+      if (genericUnitBalance.refetch) {
+        balanceRefetches.push(genericUnitBalance.refetch());
       }
       if (balanceRefetches.length) {
         await Promise.allSettled(balanceRefetches);
@@ -2615,7 +2747,9 @@ export function DepositSwap() {
       ? isOnMainnet
         ? "GUSD"
         : "Citrea GUSD"
-      : undefined;
+      : fromAssetType === "gunit"
+        ? "GUnits"
+        : undefined;
 
   const renderAssetSelector = (
     assetType: AssetType,
@@ -2653,10 +2787,14 @@ export function DepositSwap() {
       );
     }
 
+    const defaultLabel = assetType === "gunit" ? "GUnits" : "GUSD";
     return (
       <div className="flex h-11 items-center gap-2 rounded-xl border border-border/70 bg-background/80 px-3 text-sm font-medium text-foreground">
-        <TokenIcon src={gusd.iconUrl} alt="GUSD icon" />
-        <span>{labelOverride ?? "GUSD"}</span>
+        <TokenIcon
+          src={gusd.iconUrl}
+          alt={assetType === "gunit" ? "GUnit icon" : "GUSD icon"}
+        />
+        <span>{labelOverride ?? defaultLabel}</span>
       </div>
     );
   };
@@ -2732,6 +2870,42 @@ export function DepositSwap() {
                   {formDescription}
                 </p>
               </div>
+              {showRedeemSourceSelector ? (
+                <div className="rounded-2xl border border-border/60 bg-background/70 p-3">
+                  <div className="inline-flex w-full rounded-full border border-border/60 bg-background/80 p-1 text-[11px] font-semibold">
+                    <button
+                      type="button"
+                      onClick={() => handleRedeemSourceChange("gusd")}
+                      aria-pressed={redeemSource === "gusd"}
+                      disabled={txStep !== "idle"}
+                      className={cn(
+                        "flex-1 rounded-full px-3 py-1 transition",
+                        redeemSource === "gusd"
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      Redeem from GUSD
+                    </button>
+                    {showGunitRedeemSourceOption ? (
+                      <button
+                        type="button"
+                        onClick={() => handleRedeemSourceChange("gunit")}
+                        aria-pressed={redeemSource === "gunit"}
+                        disabled={txStep !== "idle"}
+                        className={cn(
+                          "flex-1 rounded-full px-3 py-1 transition",
+                          redeemSource === "gunit"
+                            ? "bg-primary text-primary-foreground"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        Withdraw from GUnits
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
               <div className="flex flex-col gap-4">
                 <SwapAssetPanel
                   label="From"

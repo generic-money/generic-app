@@ -29,16 +29,12 @@ export const OPPORTUNITY_THEME: Record<OpportunityRoute, OpportunityTheme> = {
 };
 
 export const OPPORTUNITY_APY_CAP: Record<OpportunityRoute, string> = {
-  citrea: "~3.35%",
-  predeposit: "~59%",
+  citrea: "75%",
+  predeposit: "14%",
   mainnet: "5%",
 };
 
 export const getOpportunityHref = (route: OpportunityRoute) => {
-  const base = process.env.NEXT_PUBLIC_OPPORTUNITY_BASE_URL?.replace(
-    /\/+$/,
-    "",
-  );
   if (route === "predeposit") {
     return "https://hub.status.network/pre-deposits";
   }

@@ -26,7 +26,9 @@ Use `.env.local` for local configuration.
 
 - `NEXT_PUBLIC_PROJECT_ID`: Reown project id.
 - `MAINNET_RPC_URL`: Mainnet RPC URL used by server-side endpoints.
-- `NEXT_PUBLIC_HIDE_USDC_ON_REDEEM`: Feature flag (default `false`). Set to `true` or `1` to hide `USDC` from redemption dropdowns while keeping `USDC` deposits enabled.
+- `NEXT_PUBLIC_HIDE_USDC_ON_REDEEM`: Feature flag (default `false`). Set to `true` or `1` to hide `USDC` from redemption dropdowns while keeping deposits enabled.
+- `NEXT_PUBLIC_HIDE_USDT_ON_REDEEM`: Feature flag (default `false`). Set to `true` or `1` to hide `USDT` from redemption dropdowns while keeping deposits enabled.
+- `NEXT_PUBLIC_HIDE_USDC_USDT_ON_REDEEM`: Convenience flag to hide both `USDC` and `USDT` on redeem.
 
 ## Learn More
 

@@ -48,7 +48,10 @@ import {
   getGenericDepositorAddress,
   getGenericUnitTokenAddress,
 } from "@/lib/constants/contracts";
-import { HIDE_USDC_ON_REDEEM } from "@/lib/constants/feature-flags";
+import {
+  HIDE_USDC_ON_REDEEM,
+  HIDE_USDT_ON_REDEEM,
+} from "@/lib/constants/feature-flags";
 import {
   getOpportunityHref,
   OPPORTUNITY_APY_CAP,
@@ -475,11 +478,15 @@ export function DepositSwap() {
     [stablecoinChainName],
   );
   const selectableStablecoins = useMemo(() => {
-    if (isDepositFlow || !HIDE_USDC_ON_REDEEM) {
+    if (isDepositFlow) {
       return stablecoins;
     }
 
-    return stablecoins.filter((coin) => coin.ticker !== "USDC");
+    return stablecoins.filter(
+      (coin) =>
+        (coin.ticker !== "USDC" || !HIDE_USDC_ON_REDEEM) &&
+        (coin.ticker !== "USDT" || !HIDE_USDT_ON_REDEEM),
+    );
   }, [isDepositFlow, stablecoins]);
   const publicClient = usePublicClient({ chainId: activeChainId });
   const mainnetClient = usePublicClient({ chainId: MAINNET_CHAIN_ID });

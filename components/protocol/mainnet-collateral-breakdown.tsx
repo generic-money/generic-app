@@ -25,7 +25,10 @@ type BreakdownItem = {
 
 export function MainnetCollateralBreakdown() {
   const [items, setItems] = useState<BreakdownItem[]>(
-    DEFAULT_ITEMS.map((item) => ({ symbol: item.symbol, percentFormatted: "—" })),
+    DEFAULT_ITEMS.map((item) => ({
+      symbol: item.symbol,
+      percentFormatted: "—",
+    })),
   );
 
   useEffect(() => {
@@ -50,7 +53,10 @@ export function MainnetCollateralBreakdown() {
       {DEFAULT_ITEMS.map((item) => {
         const match = items.find((entry) => entry.symbol === item.symbol);
         return (
-          <div key={item.symbol} className="flex items-center justify-between gap-2">
+          <div
+            key={item.symbol}
+            className="flex items-center justify-between gap-2"
+          >
             <span>
               {item.symbol} — {match?.percentFormatted ?? "—"}
             </span>

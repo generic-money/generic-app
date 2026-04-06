@@ -10,7 +10,12 @@ const globalCache = globalThis as typeof globalThis & {
   __memoryCache?: Map<string, CacheEntry<unknown>>;
 };
 
-const memoryCache = globalCache.__memoryCache ??= new Map();
+let memoryCache = globalCache.__memoryCache;
+
+if (!memoryCache) {
+  memoryCache = new Map();
+  globalCache.__memoryCache = memoryCache;
+}
 
 type CacheOptions = {
   ttlMs: number;
@@ -23,7 +28,9 @@ export const withMemoryCache = async <T>(
   loader: () => Promise<T>,
 ): Promise<T> => {
   const { ttlMs, staleWhileRevalidate } =
-    typeof options === "number" ? { ttlMs: options, staleWhileRevalidate: false } : options;
+    typeof options === "number"
+      ? { ttlMs: options, staleWhileRevalidate: false }
+      : options;
   const now = Date.now();
   const entry = memoryCache.get(key) as CacheEntry<T> | undefined;
 

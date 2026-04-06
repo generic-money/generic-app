@@ -18,8 +18,8 @@ export default function PrivacyPolicyPage() {
           </h2>
           <ul className="list-disc space-y-2 pl-5">
             <li>
-              Account and contact details you provide, such as email address
-              and support requests.
+              Account and contact details you provide, such as email address and
+              support requests.
             </li>
             <li>
               Wallet and on-chain activity data needed to deliver the Services,
@@ -82,9 +82,7 @@ export default function PrivacyPolicyPage() {
         </section>
 
         <section className="space-y-3">
-          <h2 className="text-base font-semibold text-foreground">
-            Security
-          </h2>
+          <h2 className="text-base font-semibold text-foreground">Security</h2>
           <p>
             We use reasonable safeguards designed to protect information. No
             system is 100% secure, and we cannot guarantee absolute security.

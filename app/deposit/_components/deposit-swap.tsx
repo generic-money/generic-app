@@ -49,10 +49,6 @@ import {
   getGenericUnitTokenAddress,
 } from "@/lib/constants/contracts";
 import {
-  HIDE_USDC_ON_REDEEM,
-  HIDE_USDT_ON_REDEEM,
-} from "@/lib/constants/feature-flags";
-import {
   getOpportunityHref,
   OPPORTUNITY_APY_CAP,
   OPPORTUNITY_THEME,
@@ -77,9 +73,16 @@ import { type HexAddress, ZERO_ADDRESS } from "@/lib/types/address";
 import { cn } from "@/lib/utils";
 import { useErc20Decimals } from "./hooks/useErc20Decimals";
 import { useErc4626Preview } from "./hooks/useErc4626Preview";
+import { useRedeemVaultLiquidity } from "./hooks/useRedeemVaultLiquidity";
 import { useTokenAllowance } from "./hooks/useTokenAllowance";
+import {
+  getRedeemLiquidityState,
+  sortLiquidityVaults,
+} from "./redeem-liquidity";
+import { RedeemLiquidityNotice } from "./redeem-liquidity-notice";
 import { SwapAssetPanel } from "./swap-asset-panel";
 import { formatBalanceText, formatTokenAmount } from "./utils/format";
+import { VaultAvailabilityDialog } from "./vault-availability-dialog";
 
 const depositorAbi =
   genericDepositorArtifact.abi as typeof genericDepositorArtifact.abi;
@@ -224,6 +227,41 @@ const toBytes32 = (value: HexBytes) =>
 
 const formatTxHash = (hash: HexBytes) =>
   `${hash.slice(0, 6)}...${hash.slice(-4)}`;
+
+const formatStablecoinAvailability = (
+  amount: bigint,
+  decimals: number | undefined,
+) => {
+  if (decimals == null) {
+    return amount.toString();
+  }
+
+  return formatTokenAmount(formatUnits(amount, decimals), 2);
+};
+
+const buildSelectedVaultLiquidityMessage = ({
+  ticker,
+  availableAssets,
+  decimals,
+}: {
+  ticker: StablecoinTicker;
+  availableAssets: bigint;
+  decimals?: number;
+}) =>
+  `This withdrawal is available, but not fully in ${ticker} right now. The ${ticker} vault currently has ${formatStablecoinAvailability(
+    availableAssets,
+    decimals,
+  )} ${ticker} available. Choose another asset or lower the ${ticker} amount to continue.`;
+
+const buildPostUnwrapLiquidityMessage = ({
+  ticker,
+}: {
+  ticker: StablecoinTicker;
+}) =>
+  `Your GUSD has already been converted to GUnits, but the ${ticker} vault no longer has enough ${ticker} available for this redemption. The value of your position is unchanged. Choose another asset or try again in a moment.`;
+
+const REDEEM_QUOTE_UNAVAILABLE_MESSAGE =
+  "Current redeem output could not be confirmed. Your position remains fully backed. Refresh and try again.";
 
 const formatTokenBalanceText = (
   balance: TokenBalanceLike,
@@ -477,17 +515,7 @@ export function DepositSwap() {
     () => getStablecoins(stablecoinChainName),
     [stablecoinChainName],
   );
-  const selectableStablecoins = useMemo(() => {
-    if (isDepositFlow) {
-      return stablecoins;
-    }
-
-    return stablecoins.filter(
-      (coin) =>
-        (coin.ticker !== "USDC" || !HIDE_USDC_ON_REDEEM) &&
-        (coin.ticker !== "USDT" || !HIDE_USDT_ON_REDEEM),
-    );
-  }, [isDepositFlow, stablecoins]);
+  const selectableStablecoins = useMemo(() => stablecoins, [stablecoins]);
   const publicClient = usePublicClient({ chainId: activeChainId });
   const mainnetClient = usePublicClient({ chainId: MAINNET_CHAIN_ID });
   const { writeContractAsync } = useWriteContract();
@@ -501,6 +529,8 @@ export function DepositSwap() {
   });
   const [selectedTicker, setSelectedTicker] =
     useState<StablecoinTicker>("USDC");
+  const [isVaultAvailabilityDialogOpen, setIsVaultAvailabilityDialogOpen] =
+    useState(false);
   const [redeemSource, setRedeemSource] = useState<RedeemSource>("gusd");
   const [pendingRedeemMaxPrefill, setPendingRedeemMaxPrefill] = useState<{
     id: number;
@@ -879,10 +909,19 @@ export function DepositSwap() {
           ? gusdMainnetBalance
           : gusdBalance;
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset amount when the active asset changes
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset amount when the active flow context changes
   useEffect(() => {
     setFromAmount("");
-  }, [selectedTicker, isDepositFlow, depositRoute, chainName, redeemSource]);
+  }, [isDepositFlow, depositRoute, chainName, redeemSource]);
+
+  useEffect(() => {
+    if (!isDepositFlow) {
+      return;
+    }
+
+    void selectedTicker;
+    setFromAmount("");
+  }, [isDepositFlow, selectedTicker]);
 
   useEffect(() => {
     if (depositRoute !== "citrea") {
@@ -1061,13 +1100,86 @@ export function DepositSwap() {
       !shouldSwitchChain &&
       (!isCitreaReturnFlow || isOnMainnet);
 
-  const { quote: previewToAmount, parsedAmount } = useErc4626Preview({
+  const {
+    quote: previewToAmount,
+    rawQuote: previewToAmountRaw,
+    parsedAmount,
+    isError: isPreviewToAmountError,
+    isFetching: isPreviewToAmountFetching,
+    isLoading: isPreviewToAmountLoading,
+  } = useErc4626Preview({
     amount: fromAmount,
     fromDecimals,
     toDecimals,
     vaultAddress: shouldUseVaultPreview ? vaultAddress : undefined,
     mode: isDepositFlow ? "deposit" : "redeem",
   });
+
+  const shouldGuardRedeemLiquidity =
+    !isDepositFlow &&
+    !isPredepositRedeem &&
+    (!isCitreaReturnFlow || isOnMainnet) &&
+    Boolean(vaultAddress);
+  const redeemVaultLiquidity = useRedeemVaultLiquidity({
+    enabled: shouldGuardRedeemLiquidity,
+    selectedTicker,
+  });
+  const redeemLiquidityState = useMemo(
+    () =>
+      getRedeemLiquidityState({
+        enabled: shouldGuardRedeemLiquidity,
+        isLoading: redeemVaultLiquidity.status === "loading",
+        isUnavailable: redeemVaultLiquidity.status === "unavailable",
+        selectedVault: redeemVaultLiquidity.selectedVault,
+        requestedAssets: !isDepositFlow ? (previewToAmountRaw ?? null) : null,
+      }),
+    [
+      isDepositFlow,
+      previewToAmountRaw,
+      redeemVaultLiquidity.selectedVault,
+      redeemVaultLiquidity.status,
+      shouldGuardRedeemLiquidity,
+    ],
+  );
+  const redeemLiquidityVaults = useMemo(() => {
+    const selectableTickers = selectableStablecoins.map((coin) => coin.ticker);
+
+    return sortLiquidityVaults(
+      (redeemVaultLiquidity.data?.vaults ?? []).filter((vault) =>
+        selectableTickers.includes(vault.ticker),
+      ),
+      selectableTickers,
+    );
+  }, [redeemVaultLiquidity.data?.vaults, selectableStablecoins]);
+  const hasEnteredRedeemAmount = Boolean(
+    !isDepositFlow && parsedAmount && parsedAmount > ZERO_AMOUNT,
+  );
+  const isRedeemQuotePending =
+    hasEnteredRedeemAmount &&
+    shouldUseVaultPreview &&
+    !isPreviewToAmountError &&
+    (isPreviewToAmountLoading ||
+      isPreviewToAmountFetching ||
+      previewToAmountRaw == null);
+  const isRedeemQuoteUnavailable =
+    hasEnteredRedeemAmount &&
+    shouldUseVaultPreview &&
+    (isPreviewToAmountError ||
+      (!isPreviewToAmountLoading &&
+        !isPreviewToAmountFetching &&
+        previewToAmountRaw == null));
+  const shouldShowRedeemLiquidityNotice = Boolean(
+    hasEnteredRedeemAmount &&
+      (redeemLiquidityState.phase === "loading" ||
+        redeemLiquidityState.phase === "insufficient" ||
+        redeemLiquidityState.phase === "unavailable"),
+  );
+
+  useEffect(() => {
+    if (isDepositFlow || !shouldGuardRedeemLiquidity) {
+      setIsVaultAvailabilityDialogOpen(false);
+    }
+  }, [isDepositFlow, shouldGuardRedeemLiquidity]);
 
   const estimatedToAmount = shouldUseVaultPreview
     ? previewToAmount
@@ -1747,6 +1859,33 @@ export function DepositSwap() {
       return { label: "Insufficient balance", disabled: true };
     }
 
+    if (!isDepositFlow && shouldUseVaultPreview) {
+      if (isRedeemQuotePending) {
+        return { label: "Preparing redeem quote…", disabled: true };
+      }
+
+      if (isRedeemQuoteUnavailable) {
+        return { label: "Redeem quote unavailable", disabled: true };
+      }
+    }
+
+    if (!isDepositFlow && shouldGuardRedeemLiquidity) {
+      if (redeemLiquidityState.phase === "loading") {
+        return { label: "Checking liquidity…", disabled: true };
+      }
+
+      if (redeemLiquidityState.phase === "unavailable") {
+        return { label: "Liquidity unavailable", disabled: true };
+      }
+
+      if (redeemLiquidityState.phase === "insufficient") {
+        return {
+          label: `Insufficient ${selectedTicker} liquidity`,
+          disabled: true,
+        };
+      }
+    }
+
     if (txStep === "approving") {
       return { label: "Approving…", disabled: true };
     }
@@ -1778,11 +1917,17 @@ export function DepositSwap() {
     isOnMainnet,
     isNonMainnetDeposit,
     isPredepositRedeem,
+    isRedeemQuotePending,
+    isRedeemQuoteUnavailable,
     selectableStablecoins.length,
     needsApproval,
     parsedAmount,
+    redeemLiquidityState.phase,
     redeemActionLabel,
     requiredChainLabel,
+    selectedTicker,
+    shouldGuardRedeemLiquidity,
+    shouldUseVaultPreview,
     shouldSwitchChain,
     stablecoinAddress,
     switchChainAsync,
@@ -1912,6 +2057,142 @@ export function DepositSwap() {
   const stakePanelPreviewValue = isStakeMode
     ? stakePreviewText
     : unstakePreviewText;
+
+  const refetchRedeemBalances = useCallback(async () => {
+    const balanceRefetches: Promise<unknown>[] = [];
+
+    if (stablecoinBalance.refetch) {
+      balanceRefetches.push(stablecoinBalance.refetch());
+    }
+    if (gusdBalance.refetch) {
+      balanceRefetches.push(gusdBalance.refetch());
+    }
+    if (genericUnitBalance.refetch) {
+      balanceRefetches.push(genericUnitBalance.refetch());
+    }
+
+    if (balanceRefetches.length) {
+      await Promise.allSettled(balanceRefetches);
+    }
+  }, [
+    genericUnitBalance.refetch,
+    gusdBalance.refetch,
+    stablecoinBalance.refetch,
+  ]);
+
+  const ensureRedeemVaultLiquidity = useCallback(
+    async ({
+      redeemShares,
+      requestedAssets,
+      postUnwrap = false,
+    }: {
+      redeemShares?: bigint;
+      requestedAssets?: bigint | null;
+      postUnwrap?: boolean;
+    }) => {
+      const redeemClient = mainnetClient ?? publicClient;
+
+      if (!redeemClient || !vaultAddress) {
+        return false;
+      }
+
+      const canCheckAccountLimits = Boolean(
+        accountAddress && redeemShares != null,
+      );
+      const [
+        availableAssets,
+        maxWithdrawAssets,
+        maxRedeemShares,
+        previewAssetsFromShares,
+      ] = await Promise.all([
+        redeemClient.readContract({
+          abi: erc4626Abi,
+          address: vaultAddress,
+          functionName: "totalAssets",
+        }) as Promise<bigint>,
+        canCheckAccountLimits
+          ? (redeemClient.readContract({
+              abi: erc4626Abi,
+              address: vaultAddress,
+              functionName: "maxWithdraw",
+              args: [accountAddress as HexAddress],
+            }) as Promise<bigint>)
+          : Promise.resolve<bigint | null>(null),
+        canCheckAccountLimits
+          ? (redeemClient.readContract({
+              abi: erc4626Abi,
+              address: vaultAddress,
+              functionName: "maxRedeem",
+              args: [accountAddress as HexAddress],
+            }) as Promise<bigint>)
+          : Promise.resolve<bigint | null>(null),
+        redeemShares != null
+          ? (redeemClient.readContract({
+              abi: erc4626Abi,
+              address: vaultAddress,
+              functionName: "previewRedeem",
+              args: [redeemShares],
+            }) as Promise<bigint>)
+          : Promise.resolve<bigint | null>(null),
+      ]);
+      const requiredAssets =
+        requestedAssets != null ? requestedAssets : previewAssetsFromShares;
+
+      if (requiredAssets == null || requiredAssets <= ZERO_AMOUNT) {
+        setTxError(REDEEM_QUOTE_UNAVAILABLE_MESSAGE);
+        pushAlert({
+          type: "warning",
+          title: "Redeem quote unavailable",
+          message: REDEEM_QUOTE_UNAVAILABLE_MESSAGE,
+        });
+        return false;
+      }
+
+      const effectiveAvailableAssets =
+        maxWithdrawAssets != null && maxWithdrawAssets < availableAssets
+          ? maxWithdrawAssets
+          : availableAssets;
+      const exceedsAccountRedeemLimit =
+        redeemShares != null &&
+        maxRedeemShares != null &&
+        redeemShares > maxRedeemShares;
+
+      if (
+        requiredAssets <= effectiveAvailableAssets &&
+        !exceedsAccountRedeemLimit
+      ) {
+        return true;
+      }
+
+      const message = postUnwrap
+        ? buildPostUnwrapLiquidityMessage({ ticker: selectedTicker })
+        : buildSelectedVaultLiquidityMessage({
+            ticker: selectedTicker,
+            availableAssets: effectiveAvailableAssets,
+            decimals: stablecoinDecimals,
+          });
+
+      setTxError(message);
+      redeemVaultLiquidity.refresh();
+      await refetchRedeemBalances();
+      pushAlert({
+        type: "warning",
+        title: "Redeem unavailable in selected asset",
+        message,
+      });
+      return false;
+    },
+    [
+      accountAddress,
+      mainnetClient,
+      publicClient,
+      vaultAddress,
+      selectedTicker,
+      stablecoinDecimals,
+      redeemVaultLiquidity.refresh,
+      refetchRedeemBalances,
+    ],
+  );
 
   const handleDeposit = async () => {
     if (
@@ -2470,6 +2751,34 @@ export function DepositSwap() {
     try {
       let redeemShares = parsedAmount;
 
+      if (isGunitRedeem) {
+        const hasLiquidity = await ensureRedeemVaultLiquidity({
+          redeemShares,
+        });
+
+        if (!hasLiquidity) {
+          return;
+        }
+      } else {
+        if (previewToAmountRaw == null) {
+          setTxError(REDEEM_QUOTE_UNAVAILABLE_MESSAGE);
+          pushAlert({
+            type: "warning",
+            title: "Redeem quote unavailable",
+            message: REDEEM_QUOTE_UNAVAILABLE_MESSAGE,
+          });
+          return;
+        }
+
+        const hasLiquidity = await ensureRedeemVaultLiquidity({
+          requestedAssets: previewToAmountRaw,
+        });
+
+        if (!hasLiquidity) {
+          return;
+        }
+      }
+
       if (!isGunitRedeem) {
         if (!gusdAddress) {
           return;
@@ -2512,15 +2821,33 @@ export function DepositSwap() {
           after: balanceAfter,
           delta: redeemShares,
         });
+
+        if (redeemShares <= ZERO_AMOUNT) {
+          setTxError("No generic unit tokens available to redeem");
+          pushAlert({
+            type: "warning",
+            title: "Redeem unavailable",
+            message: "No generic unit tokens available to redeem.",
+          });
+          return;
+        }
+
+        const hasLiquidityAfterUnwrap = await ensureRedeemVaultLiquidity({
+          redeemShares,
+          postUnwrap: true,
+        });
+
+        if (!hasLiquidityAfterUnwrap) {
+          return;
+        }
       }
 
-      if (redeemShares <= ZERO_AMOUNT) {
-        setTxError("No generic unit tokens available to redeem");
-        pushAlert({
-          type: "warning",
-          title: "Redeem unavailable",
-          message: "No generic unit tokens available to redeem.",
-        });
+      const hasLiquidityBeforeApproval = await ensureRedeemVaultLiquidity({
+        redeemShares,
+        postUnwrap: !isGunitRedeem,
+      });
+
+      if (!hasLiquidityBeforeApproval) {
         return;
       }
 
@@ -2552,6 +2879,15 @@ export function DepositSwap() {
         await refetchRedeemAllowance?.();
       }
 
+      const hasLiquidityBeforeRedeem = await ensureRedeemVaultLiquidity({
+        redeemShares,
+        postUnwrap: !isGunitRedeem,
+      });
+
+      if (!hasLiquidityBeforeRedeem) {
+        return;
+      }
+
       setTxStep("submitting");
       console.info("Redeem call", {
         functionName: "redeem",
@@ -2571,19 +2907,8 @@ export function DepositSwap() {
       notifyTxConfirmed("Redeem", redeemHash);
 
       setFromAmount("");
-      const balanceRefetches: Promise<unknown>[] = [];
-      if (stablecoinBalance.refetch) {
-        balanceRefetches.push(stablecoinBalance.refetch());
-      }
-      if (gusdBalance.refetch) {
-        balanceRefetches.push(gusdBalance.refetch());
-      }
-      if (genericUnitBalance.refetch) {
-        balanceRefetches.push(genericUnitBalance.refetch());
-      }
-      if (balanceRefetches.length) {
-        await Promise.allSettled(balanceRefetches);
-      }
+      redeemVaultLiquidity.refresh();
+      await refetchRedeemBalances();
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Transaction failed";
@@ -2626,6 +2951,24 @@ export function DepositSwap() {
     }
 
     if (insufficientBalance) {
+      return;
+    }
+
+    if (
+      !isDepositFlow &&
+      shouldUseVaultPreview &&
+      (isRedeemQuotePending || isRedeemQuoteUnavailable)
+    ) {
+      return;
+    }
+
+    if (
+      !isDepositFlow &&
+      shouldGuardRedeemLiquidity &&
+      (redeemLiquidityState.phase === "loading" ||
+        redeemLiquidityState.phase === "insufficient" ||
+        redeemLiquidityState.phase === "unavailable")
+    ) {
       return;
     }
 
@@ -3009,6 +3352,13 @@ export function DepositSwap() {
                   </div>
                 </div>
               ) : null}
+              {shouldShowRedeemLiquidityNotice ? (
+                <RedeemLiquidityNotice
+                  state={redeemLiquidityState}
+                  selectedTicker={selectedTicker}
+                  onOpenDetails={() => setIsVaultAvailabilityDialogOpen(true)}
+                />
+              ) : null}
               {postMintHref &&
               isDepositFlow &&
               !txError &&
@@ -3060,6 +3410,13 @@ export function DepositSwap() {
                   {txError}
                 </p>
               ) : null}
+              <VaultAvailabilityDialog
+                open={isVaultAvailabilityDialogOpen}
+                onOpenChange={setIsVaultAvailabilityDialogOpen}
+                selectedTicker={selectedTicker}
+                vaults={redeemLiquidityVaults}
+                onSelectTicker={handleStablecoinChange}
+              />
             </div>
             <div
               className={cn(

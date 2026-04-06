@@ -50,7 +50,10 @@ export function Footer() {
           >
             Reach out
           </a>
-          <a href="/terms-and-conditions" className="transition-colors hover:text-foreground">
+          <a
+            href="/terms-and-conditions"
+            className="transition-colors hover:text-foreground"
+          >
             Terms &amp; Conditions
           </a>
         </nav>

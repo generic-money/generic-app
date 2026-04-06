@@ -6,7 +6,6 @@ import {
   LineChart,
   ShieldCheck,
 } from "lucide-react";
-import Link from "next/link";
 
 import {
   CitreaStakedValue,
@@ -87,17 +86,17 @@ export default function HomePage() {
                       <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground">
                         TVL
                       </p>
-                    <p className="mt-1 text-lg font-bold text-foreground">
+                      <p className="mt-1 text-lg font-bold text-foreground">
                         <CitreaTvlValue />
-                    </p>
+                      </p>
                     </div>
                     <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5">
                       <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground">
                         Staked
                       </p>
-                    <p className="mt-1 text-lg font-bold text-foreground">
+                      <p className="mt-1 text-lg font-bold text-foreground">
                         <CitreaStakedValue />
-                    </p>
+                      </p>
                     </div>
                     <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2.5">
                       <p className="text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground">

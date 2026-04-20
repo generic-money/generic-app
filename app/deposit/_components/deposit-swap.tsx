@@ -215,6 +215,10 @@ const CITREA_WHITELABEL =
 const CITREA_VAULT_ADDRESS =
   "0x4Fb03AfE959394DB9C4E312A89C6e485FB3732d1" as const satisfies HexAddress;
 const CITREA_BRIDGE_PARAMS = "0x" as const satisfies HexData;
+const STATUS_DEPOSITS_PAUSED = true;
+const STATUS_DEPOSITS_PAUSED_LABEL = "Deposits paused";
+const STATUS_DEPOSITS_PAUSED_MESSAGE =
+  "Deposits on the Status networks are paused as the chain moves towards its next stage. Funds are safe, you'll hear next steps very soon.";
 
 const buildCitreaBridgeParams = (receiver: HexBytes) =>
   Options.newOptions()
@@ -1006,6 +1010,7 @@ export function DepositSwap() {
     toAssetType === "gusd" ? { fixedDecimals: 2 } : undefined,
   );
   const isStatusDeposit = isDepositFlow && depositRoute === "predeposit";
+  const isStatusDepositsPaused = STATUS_DEPOSITS_PAUSED && isStatusDeposit;
   const statusPredepositBalanceText = isStatusDeposit
     ? formatBalanceText(statusPredepositBalance, accountAddress, {
         fixedDecimals: 2,
@@ -1780,6 +1785,10 @@ export function DepositSwap() {
   const buttonState = useMemo(() => {
     const actionLabel = isDepositFlow ? depositButtonLabel : redeemActionLabel;
 
+    if (isStatusDepositsPaused) {
+      return { label: STATUS_DEPOSITS_PAUSED_LABEL, disabled: true };
+    }
+
     if (!accountAddress) {
       return { label: "Connect wallet", disabled: true };
     }
@@ -1919,6 +1928,7 @@ export function DepositSwap() {
     isPredepositRedeem,
     isRedeemQuotePending,
     isRedeemQuoteUnavailable,
+    isStatusDepositsPaused,
     selectableStablecoins.length,
     needsApproval,
     parsedAmount,
@@ -2202,6 +2212,9 @@ export function DepositSwap() {
       !depositorAddress ||
       !publicClient
     ) {
+      return;
+    }
+    if (isStatusDepositsPaused) {
       return;
     }
     if (isCitreaDeposit && isCitreaNativeBalancePending) {
@@ -2928,6 +2941,10 @@ export function DepositSwap() {
       return;
     }
 
+    if (isStatusDepositsPaused) {
+      return;
+    }
+
     if (isPredepositRedeem) {
       return;
     }
@@ -3379,6 +3396,11 @@ export function DepositSwap() {
                   {buttonState.label}
                 </button>
               )}
+              {isStatusDepositsPaused ? (
+                <p className="text-center text-xs text-muted-foreground">
+                  {STATUS_DEPOSITS_PAUSED_MESSAGE}
+                </p>
+              ) : null}
               {pendingBridgeForRoute ? (
                 <p className="text-center text-xs text-muted-foreground">
                   Bridge in progress ·{" "}

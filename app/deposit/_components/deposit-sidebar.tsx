@@ -821,13 +821,19 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
                         {statusPredepositTokenValue}
                       </p>
                       <p className="mt-2 whitespace-nowrap text-[10px] text-muted-foreground">
-                        Unlocks when Status L2 goes live
+                        Ready to withdraw
                       </p>
                     </div>
                     <div className="flex shrink-0 flex-col items-end">
-                      <span className="rounded-full border border-border/60 bg-background/70 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                        Locked
-                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleSelectOpportunity("predeposit", "redeem")
+                        }
+                        className="rounded-full border border-border/60 bg-background/70 px-3 py-1 text-[11px] font-semibold text-foreground/80 transition hover:border-primary/30 hover:bg-background hover:text-foreground"
+                      >
+                        Withdraw
+                      </button>
                     </div>
                   </div>
                 </div>

@@ -24,6 +24,35 @@ const hookMocks = vi.hoisted(() => ({
   useTokenAllowance: vi.fn(),
 }));
 
+const lineaNativeBridgeMocks = vi.hoisted(() => ({
+  loadLineaNativeBridgeRecords: vi.fn(() => []),
+  pruneLineaNativeBridgeRecords: vi.fn((records) => records),
+  saveLineaNativeBridgeRecords: vi.fn(),
+  upsertLineaNativeBridgeRecord: vi.fn((records, record) => [
+    record,
+    ...records,
+  ]),
+}));
+
+const statusExitProgressMocks = vi.hoisted(() => ({
+  clearStatusExitProgressRecord: vi.fn((records, account) =>
+    records.filter(
+      (record: { account: string }) =>
+        record.account.toLowerCase() !== account.toLowerCase(),
+    ),
+  ),
+  loadStatusExitProgressRecords: vi.fn(() => []),
+  pruneStatusExitProgressRecords: vi.fn((records) => records),
+  saveStatusExitProgressRecords: vi.fn(),
+  upsertStatusExitProgressRecord: vi.fn((records, record) => [
+    record,
+    ...records.filter(
+      (item: { account: string }) =>
+        item.account.toLowerCase() !== record.account.toLowerCase(),
+    ),
+  ]),
+}));
+
 vi.mock("next/image", () => ({
   default: (_props: ComponentProps<"img">) => <div data-testid="next-image" />,
 }));
@@ -50,6 +79,32 @@ vi.mock("@/lib/layerzero/scan", () => ({
   pruneLzBridgeRecords: vi.fn((records) => records),
   saveLzBridgeRecords: vi.fn(),
   upsertLzBridgeRecord: vi.fn((records, record) => [...records, record]),
+}));
+
+vi.mock("@/lib/linea/native-bridge", () => ({
+  LINEA_BRIDGE_URL: "https://bridge.linea.build/",
+  LINEASCAN_L1_TO_L2_URL: "https://lineascan.build/txsDeposits",
+  loadLineaNativeBridgeRecords:
+    lineaNativeBridgeMocks.loadLineaNativeBridgeRecords,
+  pruneLineaNativeBridgeRecords:
+    lineaNativeBridgeMocks.pruneLineaNativeBridgeRecords,
+  saveLineaNativeBridgeRecords:
+    lineaNativeBridgeMocks.saveLineaNativeBridgeRecords,
+  upsertLineaNativeBridgeRecord:
+    lineaNativeBridgeMocks.upsertLineaNativeBridgeRecord,
+}));
+
+vi.mock("@/lib/status/exit-progress", () => ({
+  clearStatusExitProgressRecord:
+    statusExitProgressMocks.clearStatusExitProgressRecord,
+  loadStatusExitProgressRecords:
+    statusExitProgressMocks.loadStatusExitProgressRecords,
+  pruneStatusExitProgressRecords:
+    statusExitProgressMocks.pruneStatusExitProgressRecords,
+  saveStatusExitProgressRecords:
+    statusExitProgressMocks.saveStatusExitProgressRecords,
+  upsertStatusExitProgressRecord:
+    statusExitProgressMocks.upsertStatusExitProgressRecord,
 }));
 
 vi.mock("./hooks/useErc20Decimals", () => ({
@@ -125,6 +180,14 @@ vi.mock("./redeem-liquidity-notice", () => ({
 
 const PAUSED_MESSAGE =
   "Deposits on the Status networks are paused as the chain moves towards its next stage. Funds are safe, you'll hear next steps very soon.";
+const ACCOUNT = "0x0000000000000000000000000000000000001234";
+const STATUS_CHAIN_NICKNAME =
+  "0xa4fdc657c7ba2402ba336e88c4ae1c72169f7bc116987c8aefd50982676d9a17";
+const ACCOUNT_BYTES32 =
+  "0x0000000000000000000000000000000000000000000000000000000000001234";
+const GENERIC_UNIT = "0x8c307baDbd78bEa5A1cCF9677caa58e7A2172502";
+const USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+const USDC_VAULT = "0x4825eFF24F9B7b76EEAFA2ecc6A1D5dFCb3c1c3f";
 
 const setOpportunityRoute = (
   route: "predeposit" | "citrea",
@@ -142,6 +205,14 @@ const setOpportunityRoute = (
 
 beforeEach(() => {
   vi.clearAllMocks();
+  lineaNativeBridgeMocks.loadLineaNativeBridgeRecords.mockReturnValue([]);
+  lineaNativeBridgeMocks.pruneLineaNativeBridgeRecords.mockImplementation(
+    (records) => records,
+  );
+  statusExitProgressMocks.loadStatusExitProgressRecords.mockReturnValue([]);
+  statusExitProgressMocks.pruneStatusExitProgressRecords.mockImplementation(
+    (records) => records,
+  );
 
   setOpportunityRoute("predeposit");
 
@@ -185,13 +256,28 @@ beforeEach(() => {
   });
 });
 
-test("renders a disabled paused CTA and message for Status deposits", () => {
+test("defaults Status to withdraw-only while deposits are paused", () => {
   render(<DepositSwap />);
 
   expect(
-    screen.getByRole("button", { name: /deposits paused/i }),
+    screen.getByRole("button", { name: /connect wallet/i }),
   ).toBeDisabled();
-  expect(screen.getByText(PAUSED_MESSAGE)).toBeInTheDocument();
+  expect(screen.queryByText(/status claim/i)).not.toBeInTheDocument();
+  expect(screen.getByText(/claim on linea/i)).toBeInTheDocument();
+  expect(
+    screen.queryByText(/required after redeeming/i),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("link", { name: /status announcement/i }),
+  ).toHaveAttribute(
+    "href",
+    "https://x.com/StatusL2/status/2049922023661695094",
+  );
+  expect(screen.queryByText(PAUSED_MESSAGE)).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: /switch direction/i }),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByRole("switch")).not.toBeInTheDocument();
 });
 
 test("keeps the Citrea deposit CTA unaffected", () => {
@@ -203,4 +289,207 @@ test("keeps the Citrea deposit CTA unaffected", () => {
     screen.getByRole("button", { name: /connect wallet/i }),
   ).toBeDisabled();
   expect(screen.queryByText(PAUSED_MESSAGE)).not.toBeInTheDocument();
+});
+
+test("enables Status withdrawals without exposing USDS", () => {
+  setOpportunityRoute("predeposit", "redeem");
+  wagmiMocks.useAccount.mockReturnValue({ address: ACCOUNT });
+  wagmiMocks.useReadContract.mockImplementation(
+    ({ functionName }: { functionName?: string }) => ({
+      data: functionName === "getPredeposit" ? BigInt(1_000_000) : undefined,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    }),
+  );
+  hookMocks.useErc4626Preview.mockReturnValue({
+    quote: "1",
+    rawQuote: BigInt(1_000_000),
+    parsedAmount: BigInt(1_000_000),
+    isError: false,
+    isFetching: false,
+    isLoading: false,
+  });
+  hookMocks.useRedeemVaultLiquidity.mockReturnValue({
+    status: "idle",
+    selectedVault: {
+      ticker: "USDC",
+      tokenAddress: "0x0000000000000000000000000000000000000001",
+      vaultAddress: "0x0000000000000000000000000000000000000002",
+      decimals: 6,
+      availableAmountRaw: "1000000",
+      availableFormatted: "1",
+      normalizedAmountRaw: "1000000000000000000",
+    },
+    data: { vaults: [] },
+    refresh: vi.fn(),
+  });
+
+  render(<DepositSwap />);
+
+  expect(
+    screen.getByRole("button", { name: /withdraw, redeem & bridge/i }),
+  ).toBeEnabled();
+  expect(screen.queryByText(/status claim/i)).not.toBeInTheDocument();
+  expect(screen.getByText(/claim on linea/i)).toBeInTheDocument();
+  expect(
+    screen.queryByText(/required after redeeming/i),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("link", { name: /status announcement/i }),
+  ).toHaveAttribute(
+    "href",
+    "https://x.com/StatusL2/status/2049922023661695094",
+  );
+  expect(screen.queryByText("USDS")).not.toBeInTheDocument();
+  expect(wagmiMocks.useReadContract).toHaveBeenCalledWith(
+    expect.objectContaining({
+      functionName: "getPredeposit",
+      args: [STATUS_CHAIN_NICKNAME, ACCOUNT, ACCOUNT_BYTES32],
+    }),
+  );
+});
+
+test("keeps submitted Linea native bridges in a pending claim state", async () => {
+  setOpportunityRoute("predeposit", "redeem");
+  wagmiMocks.useAccount.mockReturnValue({ address: ACCOUNT });
+  wagmiMocks.useReadContract.mockImplementation(
+    ({ functionName }: { functionName?: string }) => ({
+      data: functionName === "getPredeposit" ? BigInt(0) : undefined,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    }),
+  );
+  lineaNativeBridgeMocks.loadLineaNativeBridgeRecords.mockReturnValue([
+    {
+      txHash:
+        "0x1111111111111111111111111111111111111111111111111111111111111111",
+      account: ACCOUNT,
+      token: "0x0000000000000000000000000000000000000001",
+      ticker: "USDT",
+      amount: "1000000",
+      recipient: ACCOUNT,
+      status: "submitted",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    },
+  ]);
+
+  render(<DepositSwap />);
+
+  expect(
+    await screen.findByRole("button", { name: /usdt bridge pending claim/i }),
+  ).toBeDisabled();
+  expect(screen.getByText(/pending destination claim/i)).toBeInTheDocument();
+  expect(
+    screen.getByRole("link", { name: /open linea bridge/i }),
+  ).toHaveAttribute("href", "https://bridge.linea.build/");
+  expect(
+    screen.getByRole("link", { name: /view lineascan deposits/i }),
+  ).toHaveAttribute("href", "https://lineascan.build/txsDeposits");
+});
+
+test("allows Status exits to continue from withdrawn GUnits", async () => {
+  setOpportunityRoute("predeposit", "redeem");
+  wagmiMocks.useAccount.mockReturnValue({ address: ACCOUNT });
+  wagmiMocks.useReadContract.mockImplementation(
+    ({ functionName }: { functionName?: string }) => ({
+      data: functionName === "getPredeposit" ? BigInt(0) : undefined,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    }),
+  );
+  hookMocks.useErc4626Preview.mockReturnValue({
+    quote: "1",
+    rawQuote: BigInt(1_000_000),
+    parsedAmount: BigInt(1_000_000),
+    isError: false,
+    isFetching: false,
+    isLoading: false,
+  });
+  hookMocks.useRedeemVaultLiquidity.mockReturnValue({
+    status: "idle",
+    selectedVault: {
+      ticker: "USDC",
+      tokenAddress: USDC,
+      vaultAddress: USDC_VAULT,
+      decimals: 6,
+      availableAmountRaw: "1000000",
+      availableFormatted: "1",
+      normalizedAmountRaw: "1000000000000000000",
+    },
+    data: { vaults: [] },
+    refresh: vi.fn(),
+  });
+  statusExitProgressMocks.loadStatusExitProgressRecords.mockReturnValue([
+    {
+      account: ACCOUNT,
+      stage: "gunit",
+      ticker: "USDC",
+      chainNickname: STATUS_CHAIN_NICKNAME,
+      remoteRecipient: ACCOUNT_BYTES32,
+      genericUnitTokenAddress: GENERIC_UNIT,
+      stablecoinAddress: USDC,
+      vaultAddress: USDC_VAULT,
+      bridgeRequested: false,
+      shares: "1000000",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    },
+  ]);
+
+  render(<DepositSwap />);
+
+  expect(
+    await screen.findByRole("button", {
+      name: /continue redeem & bridge/i,
+    }),
+  ).toBeEnabled();
+  expect(screen.getByText(/status withdrawal confirmed/i)).toBeInTheDocument();
+});
+
+test("allows Status exits to continue from redeemed collateral", async () => {
+  setOpportunityRoute("predeposit", "redeem");
+  wagmiMocks.useAccount.mockReturnValue({ address: ACCOUNT });
+  wagmiMocks.useReadContract.mockImplementation(
+    ({ functionName }: { functionName?: string }) => ({
+      data: functionName === "getPredeposit" ? BigInt(0) : undefined,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    }),
+  );
+  hookMocks.useErc4626Preview.mockReturnValue({
+    quote: "",
+    rawQuote: null,
+    parsedAmount: BigInt(1_000_000),
+    isError: false,
+    isFetching: false,
+    isLoading: false,
+  });
+  statusExitProgressMocks.loadStatusExitProgressRecords.mockReturnValue([
+    {
+      account: ACCOUNT,
+      stage: "collateral",
+      ticker: "USDC",
+      chainNickname: STATUS_CHAIN_NICKNAME,
+      remoteRecipient: ACCOUNT_BYTES32,
+      genericUnitTokenAddress: GENERIC_UNIT,
+      stablecoinAddress: USDC,
+      vaultAddress: USDC_VAULT,
+      bridgeRequested: false,
+      collateralAmount: "1000000",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    },
+  ]);
+
+  render(<DepositSwap />);
+
+  expect(
+    await screen.findByRole("button", { name: /continue bridge/i }),
+  ).toBeEnabled();
+  expect(screen.getByText(/status collateral redeemed/i)).toBeInTheDocument();
 });

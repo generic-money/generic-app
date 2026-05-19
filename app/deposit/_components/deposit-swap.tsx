@@ -18,6 +18,7 @@ import {
   erc4626Abi,
   formatUnits,
   http,
+  isAddress,
   type PublicClient,
   parseUnits,
 } from "viem";
@@ -43,11 +44,34 @@ import {
 } from "@/components/ui/select";
 import { type RedeemSource, useOpportunityRoute } from "@/context";
 import { pushAlert } from "@/lib/alerts";
+import {
+  type CctpBridgeRecord,
+  fetchCctpAttestation,
+  loadCctpBridgeRecords,
+  pruneCctpBridgeRecords,
+  saveCctpBridgeRecords,
+  upsertCctpBridgeRecord,
+} from "@/lib/cctp/iris";
 import { CHAINS, getChainNameById } from "@/lib/constants/chains";
 import {
   getGenericDepositorAddress,
   getGenericUnitTokenAddress,
 } from "@/lib/constants/contracts";
+import {
+  CCTP_ETHEREUM_DOMAIN,
+  CCTP_LINEA_DOMAIN,
+  CCTP_MESSAGE_TRANSMITTER_V2_ADDRESS,
+  CCTP_STANDARD_FINALITY_THRESHOLD,
+  CCTP_TOKEN_MESSENGER_V2_ADDRESS,
+  cctpMessageTransmitterV2Abi,
+  cctpTokenMessengerV2Abi,
+  LINEA_CHAIN_ID,
+  LINEA_CHAIN_LABEL,
+  LINEA_TOKEN_BRIDGE_ADDRESS,
+  lineaMessageServiceAbi,
+  lineaTokenBridgeAbi,
+  ZERO_BYTES32,
+} from "@/lib/constants/linea";
 import {
   getOpportunityHref,
   OPPORTUNITY_APY_CAP,
@@ -68,7 +92,24 @@ import {
   saveLzBridgeRecords,
   upsertLzBridgeRecord,
 } from "@/lib/layerzero/scan";
+import {
+  LINEA_BRIDGE_URL,
+  LINEASCAN_L1_TO_L2_URL,
+  type LineaNativeBridgeRecord,
+  loadLineaNativeBridgeRecords,
+  pruneLineaNativeBridgeRecords,
+  saveLineaNativeBridgeRecords,
+  upsertLineaNativeBridgeRecord,
+} from "@/lib/linea/native-bridge";
 import { getStablecoins, gusd } from "@/lib/models/tokens";
+import {
+  clearStatusExitProgressRecord,
+  loadStatusExitProgressRecords,
+  pruneStatusExitProgressRecords,
+  type StatusExitProgressRecord,
+  saveStatusExitProgressRecords,
+  upsertStatusExitProgressRecord,
+} from "@/lib/status/exit-progress";
 import { type HexAddress, ZERO_ADDRESS } from "@/lib/types/address";
 import { cn } from "@/lib/utils";
 import { useErc20Decimals } from "./hooks/useErc20Decimals";
@@ -153,6 +194,18 @@ const bridgeCoordinatorPredepositAbi = [
     ],
     outputs: [{ name: "amount", type: "uint256" }],
   },
+  {
+    type: "function",
+    name: "withdrawPredeposit",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "chainNickname", type: "bytes32" },
+      { name: "remoteRecipient", type: "bytes32" },
+      { name: "recipient", type: "address" },
+      { name: "whitelabel", type: "address" },
+    ],
+    outputs: [],
+  },
 ] as const;
 
 type AssetType = "stablecoin" | "gusd" | "gunit";
@@ -198,6 +251,7 @@ const CITREA_NATIVE_BALANCE_THRESHOLD = BigInt(250_000);
 const CITREA_RPC_URL = "https://rpc.mainnet.citrea.xyz";
 const ENABLE_LZ_LOGS = process.env.NODE_ENV !== "production";
 const LZ_STATUS_POLL_INTERVAL_MS = 15_000;
+const CCTP_STATUS_POLL_INTERVAL_MS = 15_000;
 const AUTO_STAKE_WAIT_TIMEOUT_MS = 15 * 60 * 1000;
 const BRIDGE_COORDINATOR_L2_ADDRESS =
   "0x6E810122C2B7d474Ef568bdf221ec05f2dC8063A" as const satisfies HexAddress;
@@ -219,6 +273,8 @@ const STATUS_DEPOSITS_PAUSED = true;
 const STATUS_DEPOSITS_PAUSED_LABEL = "Deposits paused";
 const STATUS_DEPOSITS_PAUSED_MESSAGE =
   "Deposits on the Status networks are paused as the chain moves towards its next stage. Funds are safe, you'll hear next steps very soon.";
+const STATUS_LINEA_ANNOUNCEMENT_URL =
+  "https://x.com/StatusL2/status/2049922023661695094";
 
 const buildCitreaBridgeParams = (receiver: HexBytes) =>
   Options.newOptions()
@@ -228,6 +284,18 @@ const buildCitreaBridgeParams = (receiver: HexBytes) =>
 
 const toBytes32 = (value: HexBytes) =>
   `0x${value.slice(2).padStart(64, "0")}` as const;
+
+const parseStoredAmount = (value?: string) => {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return BigInt(value);
+  } catch {
+    return null;
+  }
+};
 
 const formatTxHash = (hash: HexBytes) =>
   `${hash.slice(0, 6)}...${hash.slice(-4)}`;
@@ -327,6 +395,24 @@ const estimateLzBridgeFee = async ({
   });
 };
 
+const readLineaTokenBridgeFee = async (client: PublicClient) => {
+  try {
+    const messageService = await client.readContract({
+      abi: lineaTokenBridgeAbi,
+      address: LINEA_TOKEN_BRIDGE_ADDRESS,
+      functionName: "messageService",
+    });
+
+    return await client.readContract({
+      abi: lineaMessageServiceAbi,
+      address: messageService,
+      functionName: "minimumFeeInWei",
+    });
+  } catch {
+    return ZERO_AMOUNT;
+  }
+};
+
 const buildLayerZeroMessage = (hash: HexBytes) => (
   <span className="inline-flex flex-wrap items-center gap-1.5">
     <span>Hash {formatTxHash(hash)}</span>
@@ -339,6 +425,31 @@ const buildLayerZeroMessage = (hash: HexBytes) => (
     >
       LayerZeroScan
     </a>
+  </span>
+);
+
+const buildLineaNativeBridgeMessage = (hash: HexBytes) => (
+  <span className="inline-flex flex-wrap items-center gap-1.5">
+    <span>Ethereum tx {formatTxHash(hash)} confirmed.</span>
+    <span>Track or claim the destination transfer in</span>
+    <a
+      href={LINEA_BRIDGE_URL}
+      target="_blank"
+      rel="noreferrer"
+      className="font-medium text-foreground underline underline-offset-4"
+    >
+      Linea bridge
+    </a>
+    <span>or</span>
+    <a
+      href={LINEASCAN_L1_TO_L2_URL}
+      target="_blank"
+      rel="noreferrer"
+      className="font-medium text-foreground underline underline-offset-4"
+    >
+      LineaScan
+    </a>
+    <span>.</span>
   </span>
 );
 
@@ -417,11 +528,11 @@ const OPPORTUNITY_OPTIONS: OpportunityOption[] = [
   {
     value: "predeposit",
     eyebrow: "Status L2 GUSD",
-    title: "The gasless network",
-    description: "Be early with the predeposit vaults",
-    badge: `Up to ${OPPORTUNITY_APY_CAP.predeposit} APY`,
-    note: "Unlocks at launch",
-    formDescription: "Start earning rewards before the network goes live",
+    title: "Status withdrawals",
+    description: "Withdraw predeposits into USDC or USDT",
+    badge: "Withdrawals open",
+    note: "Linea optional",
+    formDescription: "Withdraw your Status predeposit into collateral",
     iconSrc: "/chains/status.png",
     iconAlt: "Status",
   },
@@ -512,14 +623,16 @@ export function DepositSwap() {
     setFlow,
     redeemEntryRequest,
   } = useOpportunityRoute();
-  const isDepositFlow = flow === "deposit";
+  const shouldForceStatusWithdraw =
+    STATUS_DEPOSITS_PAUSED && depositRoute === "predeposit";
+  const effectiveFlow = shouldForceStatusWithdraw ? "redeem" : flow;
+  const isDepositFlow = effectiveFlow === "deposit";
   const isCitreaReturnFlow = !isDepositFlow && depositRoute === "citrea";
   const stablecoinChainName = isCitreaReturnFlow ? CHAINS.MAINNET : chainName;
   const stablecoins = useMemo(
     () => getStablecoins(stablecoinChainName),
     [stablecoinChainName],
   );
-  const selectableStablecoins = useMemo(() => stablecoins, [stablecoins]);
   const publicClient = usePublicClient({ chainId: activeChainId });
   const mainnetClient = usePublicClient({ chainId: MAINNET_CHAIN_ID });
   const { writeContractAsync } = useWriteContract();
@@ -540,7 +653,16 @@ export function DepositSwap() {
     id: number;
     source: RedeemSource;
   } | null>(null);
+  const [useCustomLineaRecipient, setUseCustomLineaRecipient] = useState(false);
+  const [lineaRecipientInput, setLineaRecipientInput] = useState("");
   const isPredepositRedeem = !isDepositFlow && depositRoute === "predeposit";
+  const selectableStablecoins = useMemo(
+    () =>
+      isPredepositRedeem
+        ? stablecoins.filter((coin) => coin.ticker !== "USDS")
+        : stablecoins,
+    [isPredepositRedeem, stablecoins],
+  );
   const isMainnetRedeem =
     !isDepositFlow && !isCitreaReturnFlow && depositRoute === "mainnet";
   const isGunitRedeem = isMainnetRedeem && redeemSource === "gunit";
@@ -581,6 +703,15 @@ export function DepositSwap() {
   const [stakePanelShifted, setStakePanelShifted] = useState(false);
   const [stakePanelVisible, setStakePanelVisible] = useState(false);
   const [lzBridgeRecords, setLzBridgeRecords] = useState<LzBridgeRecord[]>([]);
+  const [cctpBridgeRecords, setCctpBridgeRecords] = useState<
+    CctpBridgeRecord[]
+  >([]);
+  const [lineaNativeBridgeRecords, setLineaNativeBridgeRecords] = useState<
+    LineaNativeBridgeRecord[]
+  >([]);
+  const [statusExitProgressRecords, setStatusExitProgressRecords] = useState<
+    StatusExitProgressRecord[]
+  >([]);
   const [citreaNativeBalance, setCitreaNativeBalance] = useState<bigint | null>(
     null,
   );
@@ -593,12 +724,53 @@ export function DepositSwap() {
     () => createPublicClient({ transport: http(CITREA_RPC_URL) }),
     [],
   );
+  const statusExitProgress = useMemo(() => {
+    if (!accountAddress || !isPredepositRedeem) {
+      return null;
+    }
+
+    return (
+      statusExitProgressRecords.find(
+        (record) =>
+          record.account.toLowerCase() === accountAddress.toLowerCase(),
+      ) ?? null
+    );
+  }, [accountAddress, isPredepositRedeem, statusExitProgressRecords]);
+  const statusExitProgressShares = parseStoredAmount(
+    statusExitProgress?.shares,
+  );
+  const statusExitProgressCollateralAmount = parseStoredAmount(
+    statusExitProgress?.collateralAmount,
+  );
+  const isStatusExitGunitResume = statusExitProgress?.stage === "gunit";
+  const isStatusExitCollateralResume =
+    statusExitProgress?.stage === "collateral";
+
+  useEffect(() => {
+    if (!shouldForceStatusWithdraw || flow === "redeem") {
+      return;
+    }
+
+    setFlow("redeem");
+  }, [flow, setFlow, shouldForceStatusWithdraw]);
 
   useEffect(() => {
     if (!selectableStablecoins.find((coin) => coin.ticker === selectedTicker)) {
       setSelectedTicker(selectableStablecoins[0]?.ticker ?? "USDC");
     }
   }, [selectedTicker, selectableStablecoins]);
+
+  useEffect(() => {
+    if (
+      !isPredepositRedeem ||
+      !statusExitProgress ||
+      statusExitProgress.ticker === selectedTicker
+    ) {
+      return;
+    }
+
+    setSelectedTicker(statusExitProgress.ticker);
+  }, [isPredepositRedeem, selectedTicker, statusExitProgress]);
 
   useEffect(() => {
     if (!redeemEntryRequest) {
@@ -642,13 +814,13 @@ export function DepositSwap() {
     : isCitreaReturnFlow
       ? "Bridge Citrea GUSD back to mainnet, then redeem into your selected stablecoin."
       : isPredepositRedeem
-        ? "Status predeposits are locked until launch."
+        ? "Withdraw your Status predeposit, redeem into collateral, and optionally bridge it to Linea."
         : isGunitRedeem
           ? "Redeem GUnits back into your selected stablecoin."
           : "Redeem GUSD back into your selected stablecoin.";
   const showRedeemSourceSelector = isMainnetRedeem;
 
-  const canSwitchDirection = !isDepositFlow || depositRoute !== "predeposit";
+  const canSwitchDirection = !shouldForceStatusWithdraw;
 
   const handleSwitchDirection = () => {
     if (!canSwitchDirection) {
@@ -660,6 +832,10 @@ export function DepositSwap() {
   };
 
   const handleStablecoinChange = (value: StablecoinTicker) => {
+    if (statusExitProgress) {
+      return;
+    }
+
     setPostMintHref(null);
     setSelectedTicker(value);
   };
@@ -682,6 +858,13 @@ export function DepositSwap() {
   const vaultAddress = selectedStablecoin?.depositVaultAddress as
     | HexAddress
     | undefined;
+  const isStatusExitProgressSelectionReady =
+    !statusExitProgress ||
+    (statusExitProgress.ticker === selectedTicker &&
+      statusExitProgress.stablecoinAddress.toLowerCase() ===
+        stablecoinAddress?.toLowerCase() &&
+      statusExitProgress.vaultAddress.toLowerCase() ===
+        vaultAddress?.toLowerCase());
   const stablecoinChainId = MAINNET_CHAIN_ID;
   const gusdChainId =
     isCitreaReturnFlow && !isOnMainnet
@@ -879,6 +1062,7 @@ export function DepositSwap() {
       isError: false,
       data: {
         formatted: formatUnits(statusPredepositAmount, gusdDecimals),
+        value: statusPredepositAmount,
       },
     };
   }, [
@@ -890,9 +1074,11 @@ export function DepositSwap() {
 
   const fromAssetType: AssetType = isDepositFlow
     ? "stablecoin"
-    : isGunitRedeem
-      ? "gunit"
-      : "gusd";
+    : isStatusExitCollateralResume
+      ? "stablecoin"
+      : isGunitRedeem || isStatusExitGunitResume
+        ? "gunit"
+        : "gusd";
 
   const toAssetType: AssetType = isDepositFlow ? "gusd" : "stablecoin";
 
@@ -926,6 +1112,63 @@ export function DepositSwap() {
     void selectedTicker;
     setFromAmount("");
   }, [isDepositFlow, selectedTicker]);
+
+  useEffect(() => {
+    if (!isPredepositRedeem) {
+      return;
+    }
+
+    if (isStatusExitGunitResume) {
+      if (statusExitProgressShares == null || genericUnitDecimals == null) {
+        setFromAmount("");
+        return;
+      }
+
+      setFromAmount(formatUnits(statusExitProgressShares, genericUnitDecimals));
+      return;
+    }
+
+    if (isStatusExitCollateralResume) {
+      if (
+        statusExitProgressCollateralAmount == null ||
+        stablecoinDecimals == null
+      ) {
+        setFromAmount("");
+        return;
+      }
+
+      setFromAmount(
+        formatUnits(statusExitProgressCollateralAmount, stablecoinDecimals),
+      );
+      return;
+    }
+
+    if (statusPredepositAmount == null || gusdDecimals == null) {
+      setFromAmount("");
+      return;
+    }
+
+    setFromAmount(formatUnits(statusPredepositAmount, gusdDecimals));
+  }, [
+    genericUnitDecimals,
+    gusdDecimals,
+    isPredepositRedeem,
+    isStatusExitCollateralResume,
+    isStatusExitGunitResume,
+    stablecoinDecimals,
+    statusExitProgressCollateralAmount,
+    statusExitProgressShares,
+    statusPredepositAmount,
+  ]);
+
+  useEffect(() => {
+    if (isPredepositRedeem) {
+      return;
+    }
+
+    setUseCustomLineaRecipient(false);
+    setLineaRecipientInput("");
+  }, [isPredepositRedeem]);
 
   useEffect(() => {
     if (depositRoute !== "citrea") {
@@ -983,6 +1226,18 @@ export function DepositSwap() {
   }, []);
 
   useEffect(() => {
+    setCctpBridgeRecords(loadCctpBridgeRecords());
+  }, []);
+
+  useEffect(() => {
+    setLineaNativeBridgeRecords(loadLineaNativeBridgeRecords());
+  }, []);
+
+  useEffect(() => {
+    setStatusExitProgressRecords(loadStatusExitProgressRecords());
+  }, []);
+
+  useEffect(() => {
     const pruned = pruneLzBridgeRecords(lzBridgeRecords);
     if (pruned !== lzBridgeRecords) {
       setLzBridgeRecords(pruned);
@@ -990,6 +1245,33 @@ export function DepositSwap() {
     }
     saveLzBridgeRecords(pruned);
   }, [lzBridgeRecords]);
+
+  useEffect(() => {
+    const pruned = pruneCctpBridgeRecords(cctpBridgeRecords);
+    if (pruned !== cctpBridgeRecords) {
+      setCctpBridgeRecords(pruned);
+      return;
+    }
+    saveCctpBridgeRecords(pruned);
+  }, [cctpBridgeRecords]);
+
+  useEffect(() => {
+    const pruned = pruneLineaNativeBridgeRecords(lineaNativeBridgeRecords);
+    if (pruned !== lineaNativeBridgeRecords) {
+      setLineaNativeBridgeRecords(pruned);
+      return;
+    }
+    saveLineaNativeBridgeRecords(pruned);
+  }, [lineaNativeBridgeRecords]);
+
+  useEffect(() => {
+    const pruned = pruneStatusExitProgressRecords(statusExitProgressRecords);
+    if (pruned !== statusExitProgressRecords) {
+      setStatusExitProgressRecords(pruned);
+      return;
+    }
+    saveStatusExitProgressRecords(pruned);
+  }, [statusExitProgressRecords]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -1053,7 +1335,9 @@ export function DepositSwap() {
   ]);
 
   const canUseMax =
-    Boolean(accountAddress) && Boolean(fromBalanceHook.data?.formatted);
+    !isPredepositRedeem &&
+    Boolean(accountAddress) &&
+    Boolean(fromBalanceHook.data?.formatted);
   const isCitreaNativeBalancePending =
     isCitreaDeposit &&
     !isCitreaNativeBalanceError &&
@@ -1101,7 +1385,7 @@ export function DepositSwap() {
 
   const shouldUseVaultPreview = isDepositFlow
     ? !isNonMainnetDeposit && !shouldSwitchChain
-    : !isPredepositRedeem &&
+    : !isStatusExitCollateralResume &&
       !shouldSwitchChain &&
       (!isCitreaReturnFlow || isOnMainnet);
 
@@ -1122,7 +1406,7 @@ export function DepositSwap() {
 
   const shouldGuardRedeemLiquidity =
     !isDepositFlow &&
-    !isPredepositRedeem &&
+    !isStatusExitCollateralResume &&
     (!isCitreaReturnFlow || isOnMainnet) &&
     Boolean(vaultAddress);
   const redeemVaultLiquidity = useRedeemVaultLiquidity({
@@ -1189,8 +1473,9 @@ export function DepositSwap() {
   const estimatedToAmount = shouldUseVaultPreview
     ? previewToAmount
     : fromAmount;
-  const fromPlaceholder =
-    fromAssetType === "stablecoin"
+  const fromPlaceholder = isPredepositRedeem
+    ? "Status predeposit amount"
+    : fromAssetType === "stablecoin"
       ? `Amount in ${selectedStablecoin?.ticker ?? ""}`
       : fromAssetType === "gunit"
         ? "Amount in GUnits"
@@ -1269,7 +1554,9 @@ export function DepositSwap() {
       ? isOnMainnet
         ? needsRedeemApproval
         : needsCitreaApproval
-      : needsRedeemApproval;
+      : isPredepositRedeem
+        ? false
+        : needsRedeemApproval;
   const fromBalanceValue = (() => {
     const data = fromBalanceHook.data;
     if (data && typeof data === "object" && "value" in data) {
@@ -1420,12 +1707,49 @@ export function DepositSwap() {
   );
   const pendingLzRecordsRef = useRef<LzBridgeRecord[]>(pendingLzRecords);
   const lzStatusPollInFlightRef = useRef(false);
+  const cctpPollInFlightRef = useRef(false);
   const pendingL1ToCitrea = pendingLzRecords.find(
     (record) => record.direction === "l1-to-citrea",
   );
   const pendingCitreaToL1 = pendingLzRecords.find(
     (record) => record.direction === "citrea-to-l1",
   );
+  const pendingCctpRecord = useMemo(() => {
+    if (!accountAddress) {
+      return null;
+    }
+
+    return (
+      cctpBridgeRecords.find(
+        (record) =>
+          record.account.toLowerCase() === accountAddress.toLowerCase() &&
+          record.status !== "minted",
+      ) ?? null
+    );
+  }, [accountAddress, cctpBridgeRecords]);
+  const pendingLineaNativeBridgeRecord = useMemo(() => {
+    if (!accountAddress) {
+      return null;
+    }
+
+    return (
+      lineaNativeBridgeRecords.find(
+        (record) =>
+          record.account.toLowerCase() === accountAddress.toLowerCase() &&
+          record.status === "submitted",
+      ) ?? null
+    );
+  }, [accountAddress, lineaNativeBridgeRecords]);
+  const pendingCctpAttestationReady =
+    pendingCctpRecord?.status === "attested" &&
+    Boolean(pendingCctpRecord.message && pendingCctpRecord.attestation);
+  const customLineaRecipient = lineaRecipientInput.trim();
+  const isCustomLineaRecipientValid =
+    !useCustomLineaRecipient || isAddress(customLineaRecipient);
+  const lineaRecipient =
+    useCustomLineaRecipient && isAddress(customLineaRecipient)
+      ? (customLineaRecipient as HexAddress)
+      : accountAddress;
   const isBridgeToCitreaPending =
     bridgeStakeState === "bridging" ||
     bridgeStakeState === "waiting" ||
@@ -1683,6 +2007,67 @@ export function DepositSwap() {
   }, [pendingLzPollKey]);
 
   useEffect(() => {
+    if (!pendingCctpRecord || pendingCctpRecord.status !== "submitted") {
+      return;
+    }
+
+    let cancelled = false;
+
+    const pollAttestation = async () => {
+      if (cctpPollInFlightRef.current) {
+        return;
+      }
+
+      cctpPollInFlightRef.current = true;
+
+      try {
+        const attestation = await fetchCctpAttestation({
+          txHash: pendingCctpRecord.txHash,
+          sourceDomain: pendingCctpRecord.sourceDomain,
+        });
+
+        if (cancelled || !attestation) {
+          return;
+        }
+
+        setCctpBridgeRecords((current) =>
+          current.map((record) =>
+            record.txHash.toLowerCase() ===
+            pendingCctpRecord.txHash.toLowerCase()
+              ? {
+                  ...record,
+                  status: "attested",
+                  message: attestation.message,
+                  attestation: attestation.attestation,
+                  updatedAt: Date.now(),
+                }
+              : record,
+          ),
+        );
+      } catch (error) {
+        if (ENABLE_LZ_LOGS) {
+          console.warn("CCTP poll: attestation fetch failed", {
+            txHash: pendingCctpRecord.txHash,
+            error,
+          });
+        }
+      } finally {
+        cctpPollInFlightRef.current = false;
+      }
+    };
+
+    void pollAttestation();
+    const interval = window.setInterval(() => {
+      void pollAttestation();
+    }, CCTP_STATUS_POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [pendingCctpRecord]);
+
+  useEffect(() => {
     if (
       bridgeStakeState !== "waiting" ||
       !autoStakeFlow?.active ||
@@ -1776,11 +2161,18 @@ export function DepositSwap() {
       : isBridgeAndStakeFlow
         ? "Bridge & Stake"
         : "Mint";
-  const redeemActionLabel = isCitreaReturnFlow
-    ? isOnMainnet
-      ? "Redeem"
-      : "Bridge"
-    : "Redeem";
+  const statusResumeActionLabel = isStatusExitCollateralResume
+    ? "Continue Bridge"
+    : isStatusExitGunitResume
+      ? "Continue Redeem & Bridge"
+      : null;
+  const redeemActionLabel = isPredepositRedeem
+    ? (statusResumeActionLabel ?? "Withdraw, Redeem & Bridge")
+    : isCitreaReturnFlow
+      ? isOnMainnet
+        ? "Redeem"
+        : "Bridge"
+      : "Redeem";
 
   const buttonState = useMemo(() => {
     const actionLabel = isDepositFlow ? depositButtonLabel : redeemActionLabel;
@@ -1793,8 +2185,20 @@ export function DepositSwap() {
       return { label: "Connect wallet", disabled: true };
     }
 
-    if (isPredepositRedeem) {
-      return { label: "Locked", disabled: true };
+    if (isPredepositRedeem && pendingCctpRecord) {
+      if (txStep === "submitting") {
+        return { label: "Minting USDC…", disabled: true };
+      }
+
+      if (pendingCctpRecord.status === "submitted") {
+        return { label: "Waiting for Circle attestation…", disabled: true };
+      }
+
+      if (activeChainId !== LINEA_CHAIN_ID) {
+        return { label: `Switch to ${LINEA_CHAIN_LABEL}`, disabled: false };
+      }
+
+      return { label: "Mint USDC on Linea", disabled: false };
     }
 
     if (isCitreaReturnFlow && isOnMainnet && !citreaReturnReadyForRedeem) {
@@ -1809,6 +2213,49 @@ export function DepositSwap() {
 
     if (isDepositFlow && isCitreaDeposit && isAutoStakeFlowInProgress) {
       return { label: "Bridge in progress…", disabled: true };
+    }
+
+    if (isPredepositRedeem) {
+      if (statusExitProgress && !isStatusExitProgressSelectionReady) {
+        return { label: "Preparing recovery…", disabled: true };
+      }
+
+      if (
+        !statusExitProgress?.bridgeRecipient &&
+        !isCustomLineaRecipientValid
+      ) {
+        return { label: "Invalid Linea recipient", disabled: true };
+      }
+
+      if (!(statusExitProgress?.bridgeRecipient ?? lineaRecipient)) {
+        return { label: "Linea recipient unavailable", disabled: true };
+      }
+
+      if (isStatusExitGunitResume) {
+        if (
+          statusExitProgressShares == null ||
+          statusExitProgressShares <= ZERO_AMOUNT
+        ) {
+          return { label: "Stored GUnits unavailable", disabled: true };
+        }
+      } else if (isStatusExitCollateralResume) {
+        if (
+          statusExitProgressCollateralAmount == null ||
+          statusExitProgressCollateralAmount <= ZERO_AMOUNT
+        ) {
+          return { label: "Collateral unavailable", disabled: true };
+        }
+      } else if (isStatusPredepositLoading) {
+        return { label: "Checking predeposit…", disabled: true };
+      } else if (isStatusPredepositError || statusPredepositAmount == null) {
+        return { label: "Predeposit unavailable", disabled: true };
+      } else if (statusPredepositAmount <= ZERO_AMOUNT) {
+        if (pendingLineaNativeBridgeRecord) {
+          return { label: "USDT bridge pending claim", disabled: true };
+        }
+
+        return { label: "No Status predeposit", disabled: true };
+      }
     }
 
     if (shouldSwitchChain) {
@@ -1841,11 +2288,11 @@ export function DepositSwap() {
         }
       }
     } else {
-      if (!isPredepositRedeem && selectableStablecoins.length === 0) {
+      if (selectableStablecoins.length === 0) {
         return { label: "No redeem asset available", disabled: true };
       }
 
-      if (!isGunitRedeem && !gusdAddress) {
+      if (!isGunitRedeem && !isPredepositRedeem && !gusdAddress) {
         return { label: "GUSD unavailable", disabled: true };
       }
 
@@ -1910,6 +2357,7 @@ export function DepositSwap() {
     return { label: actionLabel, disabled: false };
   }, [
     accountAddress,
+    activeChainId,
     citreaReturnFinal,
     citreaReturnPending,
     citreaReturnReadyForRedeem,
@@ -1923,14 +2371,23 @@ export function DepositSwap() {
     isDepositFlow,
     isAutoStakeFlowInProgress,
     isGunitRedeem,
+    isCustomLineaRecipientValid,
     isOnMainnet,
     isNonMainnetDeposit,
     isPredepositRedeem,
     isRedeemQuotePending,
     isRedeemQuoteUnavailable,
+    isStatusExitCollateralResume,
+    isStatusExitGunitResume,
+    isStatusExitProgressSelectionReady,
     isStatusDepositsPaused,
+    isStatusPredepositError,
+    isStatusPredepositLoading,
+    lineaRecipient,
     selectableStablecoins.length,
     needsApproval,
+    pendingCctpRecord,
+    pendingLineaNativeBridgeRecord,
     parsedAmount,
     redeemLiquidityState.phase,
     redeemActionLabel,
@@ -1940,6 +2397,10 @@ export function DepositSwap() {
     shouldUseVaultPreview,
     shouldSwitchChain,
     stablecoinAddress,
+    statusExitProgress,
+    statusExitProgressCollateralAmount,
+    statusExitProgressShares,
+    statusPredepositAmount,
     switchChainAsync,
     txStep,
     vaultAddress,
@@ -2936,6 +3397,588 @@ export function DepositSwap() {
     }
   };
 
+  const handleMintCctpOnLinea = async () => {
+    if (!pendingCctpRecord || !accountAddress) {
+      return;
+    }
+
+    if (!pendingCctpAttestationReady) {
+      return;
+    }
+
+    if (activeChainId !== LINEA_CHAIN_ID) {
+      if (switchChainAsync) {
+        await switchChainAsync({ chainId: LINEA_CHAIN_ID });
+      }
+      return;
+    }
+
+    if (
+      !publicClient ||
+      !pendingCctpRecord.message ||
+      !pendingCctpRecord.attestation
+    ) {
+      return;
+    }
+
+    setTxError(null);
+    setTxStep("submitting");
+
+    try {
+      console.info("CCTP receive call", {
+        functionName: "receiveMessage",
+        address: CCTP_MESSAGE_TRANSMITTER_V2_ADDRESS,
+        chainId: LINEA_CHAIN_ID,
+        txHash: pendingCctpRecord.txHash,
+      });
+      const mintHash = await writeContractAsync({
+        abi: cctpMessageTransmitterV2Abi,
+        address: CCTP_MESSAGE_TRANSMITTER_V2_ADDRESS,
+        chainId: LINEA_CHAIN_ID,
+        functionName: "receiveMessage",
+        args: [pendingCctpRecord.message, pendingCctpRecord.attestation],
+      });
+      notifyTxSubmitted("Linea mint", mintHash);
+      await publicClient.waitForTransactionReceipt({ hash: mintHash });
+      notifyTxConfirmed("Linea mint", mintHash);
+
+      setCctpBridgeRecords((current) =>
+        current.map((record) =>
+          record.txHash.toLowerCase() === pendingCctpRecord.txHash.toLowerCase()
+            ? {
+                ...record,
+                status: "minted",
+                updatedAt: Date.now(),
+                finalizedAt: Date.now(),
+              }
+            : record,
+        ),
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Linea mint failed";
+      setTxError(message);
+      pushAlert({
+        type: "error",
+        title: "Linea mint failed",
+        message,
+      });
+    } finally {
+      setTxStep("idle");
+    }
+  };
+
+  const handleStatusExit = async () => {
+    const progress = statusExitProgress;
+    const exitTicker = progress?.ticker ?? selectedTicker;
+    const exitVaultAddress = progress?.vaultAddress ?? vaultAddress;
+    const exitGenericUnitTokenAddress =
+      progress?.genericUnitTokenAddress ?? genericUnitTokenAddress;
+    const exitStablecoinAddress =
+      progress?.stablecoinAddress ?? stablecoinAddress;
+    const exitBridgeRequested = true;
+    const recipient = progress?.bridgeRecipient ?? lineaRecipient;
+    const progressCreatedAt = progress?.createdAt ?? Date.now();
+
+    if (
+      !accountAddress ||
+      !exitVaultAddress ||
+      !exitGenericUnitTokenAddress ||
+      !exitStablecoinAddress ||
+      !statusPredepositChainNickname ||
+      !publicClient
+    ) {
+      return;
+    }
+
+    if (!isStatusExitProgressSelectionReady) {
+      return;
+    }
+
+    if (exitBridgeRequested && !recipient) {
+      return;
+    }
+
+    if (!progress) {
+      if (
+        !isCustomLineaRecipientValid ||
+        statusPredepositAmount == null ||
+        statusPredepositAmount <= ZERO_AMOUNT
+      ) {
+        return;
+      }
+    }
+
+    if (
+      progress?.stage === "gunit" &&
+      (statusExitProgressShares == null ||
+        statusExitProgressShares <= ZERO_AMOUNT)
+    ) {
+      return;
+    }
+
+    if (
+      progress?.stage === "collateral" &&
+      (statusExitProgressCollateralAmount == null ||
+        statusExitProgressCollateralAmount <= ZERO_AMOUNT)
+    ) {
+      return;
+    }
+
+    const statusClient = mainnetClient ?? publicClient;
+    const writeProgress = (
+      record: Omit<
+        StatusExitProgressRecord,
+        "account" | "createdAt" | "updatedAt"
+      >,
+    ) => {
+      const now = Date.now();
+      setStatusExitProgressRecords((current) =>
+        upsertStatusExitProgressRecord(current, {
+          ...record,
+          account: accountAddress,
+          createdAt: progressCreatedAt,
+          updatedAt: now,
+        }),
+      );
+    };
+    const clearProgress = () => {
+      setStatusExitProgressRecords((current) =>
+        clearStatusExitProgressRecord(current, accountAddress),
+      );
+    };
+    const writeGunitProgress = (shares: bigint) => {
+      writeProgress({
+        stage: "gunit",
+        ticker: exitTicker,
+        chainNickname: statusPredepositChainNickname,
+        remoteRecipient: progress?.remoteRecipient ?? predepositRecipient,
+        genericUnitTokenAddress: exitGenericUnitTokenAddress,
+        stablecoinAddress: exitStablecoinAddress,
+        vaultAddress: exitVaultAddress,
+        bridgeRequested: exitBridgeRequested,
+        bridgeRecipient: exitBridgeRequested ? recipient : undefined,
+        shares: shares.toString(),
+      });
+    };
+    const writeCollateralProgress = (amount: bigint) => {
+      writeProgress({
+        stage: "collateral",
+        ticker: exitTicker,
+        chainNickname: statusPredepositChainNickname,
+        remoteRecipient: progress?.remoteRecipient ?? predepositRecipient,
+        genericUnitTokenAddress: exitGenericUnitTokenAddress,
+        stablecoinAddress: exitStablecoinAddress,
+        vaultAddress: exitVaultAddress,
+        bridgeRequested: exitBridgeRequested,
+        bridgeRecipient: exitBridgeRequested ? recipient : undefined,
+        collateralAmount: amount.toString(),
+      });
+    };
+    const refetchStatusExitBalances = async () => {
+      redeemVaultLiquidity.refresh();
+      const refetches: Promise<unknown>[] = [];
+      if (refetchStatusPredeposit) {
+        refetches.push(refetchStatusPredeposit());
+      }
+      if (stablecoinBalance.refetch) {
+        refetches.push(stablecoinBalance.refetch());
+      }
+      if (genericUnitBalance.refetch) {
+        refetches.push(genericUnitBalance.refetch());
+      }
+      if (refetches.length) {
+        await Promise.allSettled(refetches);
+      }
+    };
+
+    setTxError(null);
+    setPostMintHref(null);
+
+    try {
+      let redeemShares =
+        progress?.stage === "gunit" ? statusExitProgressShares : null;
+      let redeemedAmount =
+        progress?.stage === "collateral"
+          ? statusExitProgressCollateralAmount
+          : null;
+
+      if (!progress) {
+        const unitBalanceBefore = await statusClient.readContract({
+          abi: erc20Abi,
+          address: exitGenericUnitTokenAddress,
+          functionName: "balanceOf",
+          args: [accountAddress],
+        });
+
+        setTxStep("submitting");
+        console.info("Status predeposit withdrawal call", {
+          functionName: "withdrawPredeposit",
+          address: BRIDGE_COORDINATOR_L1_ADDRESS,
+          chainId: MAINNET_CHAIN_ID,
+          args: [
+            statusPredepositChainNickname,
+            predepositRecipient,
+            accountAddress,
+            ZERO_ADDRESS,
+          ],
+        });
+        const withdrawHash = await writeContractAsync({
+          abi: bridgeCoordinatorPredepositAbi,
+          address: BRIDGE_COORDINATOR_L1_ADDRESS,
+          chainId: MAINNET_CHAIN_ID,
+          functionName: "withdrawPredeposit",
+          args: [
+            statusPredepositChainNickname,
+            predepositRecipient,
+            accountAddress,
+            ZERO_ADDRESS,
+          ],
+        });
+        notifyTxSubmitted("Status withdrawal", withdrawHash);
+        await publicClient.waitForTransactionReceipt({ hash: withdrawHash });
+        notifyTxConfirmed("Status withdrawal", withdrawHash);
+
+        const unitBalanceAfter = await statusClient.readContract({
+          abi: erc20Abi,
+          address: exitGenericUnitTokenAddress,
+          functionName: "balanceOf",
+          args: [accountAddress],
+        });
+        redeemShares = unitBalanceAfter - unitBalanceBefore;
+
+        if (redeemShares <= ZERO_AMOUNT) {
+          setTxError("No GenericUnit tokens were withdrawn.");
+          pushAlert({
+            type: "warning",
+            title: "Withdrawal unavailable",
+            message: "No GenericUnit tokens were withdrawn.",
+          });
+          return;
+        }
+
+        writeGunitProgress(redeemShares);
+      }
+
+      if (redeemedAmount == null) {
+        if (redeemShares == null || redeemShares <= ZERO_AMOUNT) {
+          setTxError("No GenericUnit tokens are available to redeem.");
+          pushAlert({
+            type: "warning",
+            title: "Redeem unavailable",
+            message: "No GenericUnit tokens are available to redeem.",
+          });
+          return;
+        }
+
+        const hasLiquidityBeforeApproval = await ensureRedeemVaultLiquidity({
+          redeemShares,
+        });
+
+        if (!hasLiquidityBeforeApproval) {
+          return;
+        }
+
+        const currentAllowance = await statusClient.readContract({
+          abi: erc20Abi,
+          address: exitGenericUnitTokenAddress,
+          functionName: "allowance",
+          args: [accountAddress, exitVaultAddress],
+        });
+
+        if (currentAllowance < redeemShares) {
+          setTxStep("approving");
+          console.info("Status redeem approval call", {
+            functionName: "approve",
+            address: exitGenericUnitTokenAddress,
+            chainId: MAINNET_CHAIN_ID,
+            args: [exitVaultAddress, redeemShares],
+          });
+          const approvalHash = await writeContractAsync({
+            abi: erc20Abi,
+            address: exitGenericUnitTokenAddress,
+            chainId: MAINNET_CHAIN_ID,
+            functionName: "approve",
+            args: [exitVaultAddress, redeemShares],
+          });
+          notifyTxSubmitted("Approval", approvalHash);
+          await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+          notifyTxConfirmed("Approval", approvalHash);
+          await refetchRedeemAllowance?.();
+        }
+
+        const hasLiquidityBeforeRedeem = await ensureRedeemVaultLiquidity({
+          redeemShares,
+        });
+
+        if (!hasLiquidityBeforeRedeem) {
+          return;
+        }
+
+        const stablecoinBalanceBefore = await statusClient.readContract({
+          abi: erc20Abi,
+          address: exitStablecoinAddress,
+          functionName: "balanceOf",
+          args: [accountAddress],
+        });
+
+        setTxStep("submitting");
+        console.info("Status redeem call", {
+          functionName: "redeem",
+          address: exitVaultAddress,
+          chainId: MAINNET_CHAIN_ID,
+          args: [redeemShares, accountAddress, accountAddress],
+        });
+        const redeemHash = await writeContractAsync({
+          abi: erc4626Abi,
+          address: exitVaultAddress,
+          chainId: MAINNET_CHAIN_ID,
+          functionName: "redeem",
+          args: [redeemShares, accountAddress, accountAddress],
+        });
+        notifyTxSubmitted("Redeem", redeemHash);
+        await publicClient.waitForTransactionReceipt({ hash: redeemHash });
+        notifyTxConfirmed("Redeem", redeemHash);
+
+        const stablecoinBalanceAfter = await statusClient.readContract({
+          abi: erc20Abi,
+          address: exitStablecoinAddress,
+          functionName: "balanceOf",
+          args: [accountAddress],
+        });
+        redeemedAmount = stablecoinBalanceAfter - stablecoinBalanceBefore;
+
+        if (redeemedAmount <= ZERO_AMOUNT) {
+          setTxError(`No ${exitTicker} was redeemed.`);
+          pushAlert({
+            type: "warning",
+            title: "Redeem unavailable",
+            message: `No ${exitTicker} was redeemed.`,
+          });
+          return;
+        }
+
+        if (!exitBridgeRequested) {
+          clearProgress();
+          setFromAmount("");
+          await refetchStatusExitBalances();
+          return;
+        }
+
+        writeCollateralProgress(redeemedAmount);
+      }
+
+      if (!exitBridgeRequested) {
+        clearProgress();
+        setFromAmount("");
+        await refetchStatusExitBalances();
+        return;
+      }
+
+      if (
+        !recipient ||
+        redeemedAmount == null ||
+        redeemedAmount <= ZERO_AMOUNT
+      ) {
+        return;
+      }
+
+      const bridgeBalance = await statusClient.readContract({
+        abi: erc20Abi,
+        address: exitStablecoinAddress,
+        functionName: "balanceOf",
+        args: [accountAddress],
+      });
+
+      if (bridgeBalance < redeemedAmount) {
+        setTxError(`Insufficient ${exitTicker} balance to continue bridge.`);
+        pushAlert({
+          type: "warning",
+          title: "Bridge unavailable",
+          message: `Your ${exitTicker} balance is lower than the stored bridge amount.`,
+        });
+        return;
+      }
+
+      if (exitTicker === "USDC") {
+        const bridgeAllowance = await statusClient.readContract({
+          abi: erc20Abi,
+          address: exitStablecoinAddress,
+          functionName: "allowance",
+          args: [accountAddress, CCTP_TOKEN_MESSENGER_V2_ADDRESS],
+        });
+
+        if (bridgeAllowance < redeemedAmount) {
+          setTxStep("approving");
+          console.info("CCTP USDC approval call", {
+            functionName: "approve",
+            address: exitStablecoinAddress,
+            chainId: MAINNET_CHAIN_ID,
+            args: [CCTP_TOKEN_MESSENGER_V2_ADDRESS, redeemedAmount],
+          });
+          const approvalHash = await writeContractAsync({
+            abi: erc20Abi,
+            address: exitStablecoinAddress,
+            chainId: MAINNET_CHAIN_ID,
+            functionName: "approve",
+            args: [CCTP_TOKEN_MESSENGER_V2_ADDRESS, redeemedAmount],
+          });
+          notifyTxSubmitted("Bridge approval", approvalHash);
+          await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+          notifyTxConfirmed("Bridge approval", approvalHash);
+        }
+
+        const cctpMaxFee = ZERO_AMOUNT;
+        const mintRecipient = toBytes32(recipient);
+
+        setTxStep("submitting");
+        console.info("CCTP depositForBurn call", {
+          functionName: "depositForBurn",
+          address: CCTP_TOKEN_MESSENGER_V2_ADDRESS,
+          chainId: MAINNET_CHAIN_ID,
+          args: [
+            redeemedAmount,
+            CCTP_LINEA_DOMAIN,
+            mintRecipient,
+            exitStablecoinAddress,
+            ZERO_BYTES32,
+            cctpMaxFee,
+            CCTP_STANDARD_FINALITY_THRESHOLD,
+          ],
+        });
+        const burnHash = await writeContractAsync({
+          abi: cctpTokenMessengerV2Abi,
+          address: CCTP_TOKEN_MESSENGER_V2_ADDRESS,
+          chainId: MAINNET_CHAIN_ID,
+          functionName: "depositForBurn",
+          args: [
+            redeemedAmount,
+            CCTP_LINEA_DOMAIN,
+            mintRecipient,
+            exitStablecoinAddress,
+            ZERO_BYTES32,
+            cctpMaxFee,
+            CCTP_STANDARD_FINALITY_THRESHOLD,
+          ],
+        });
+        notifyTxSubmitted("USDC burn", burnHash);
+        await publicClient.waitForTransactionReceipt({ hash: burnHash });
+        notifyTxConfirmed("USDC burn", burnHash);
+
+        const now = Date.now();
+        setCctpBridgeRecords((current) =>
+          upsertCctpBridgeRecord(current, {
+            txHash: burnHash,
+            account: accountAddress,
+            amount: redeemedAmount.toString(),
+            recipient,
+            sourceDomain: CCTP_ETHEREUM_DOMAIN,
+            destinationDomain: CCTP_LINEA_DOMAIN,
+            status: "submitted",
+            createdAt: now,
+            updatedAt: now,
+          }),
+        );
+        clearProgress();
+      } else if (exitTicker === "USDT") {
+        const bridgeAllowance = await statusClient.readContract({
+          abi: erc20Abi,
+          address: exitStablecoinAddress,
+          functionName: "allowance",
+          args: [accountAddress, LINEA_TOKEN_BRIDGE_ADDRESS],
+        });
+
+        if (bridgeAllowance < redeemedAmount) {
+          setTxStep("approving");
+          if (bridgeAllowance > ZERO_AMOUNT) {
+            const resetHash = await writeContractAsync({
+              abi: erc20Abi,
+              address: exitStablecoinAddress,
+              chainId: MAINNET_CHAIN_ID,
+              functionName: "approve",
+              args: [LINEA_TOKEN_BRIDGE_ADDRESS, ZERO_AMOUNT],
+            });
+            notifyTxSubmitted("Bridge approval reset", resetHash);
+            await publicClient.waitForTransactionReceipt({ hash: resetHash });
+            notifyTxConfirmed("Bridge approval reset", resetHash);
+          }
+
+          console.info("Linea USDT approval call", {
+            functionName: "approve",
+            address: exitStablecoinAddress,
+            chainId: MAINNET_CHAIN_ID,
+            args: [LINEA_TOKEN_BRIDGE_ADDRESS, redeemedAmount],
+          });
+          const approvalHash = await writeContractAsync({
+            abi: erc20Abi,
+            address: exitStablecoinAddress,
+            chainId: MAINNET_CHAIN_ID,
+            functionName: "approve",
+            args: [LINEA_TOKEN_BRIDGE_ADDRESS, redeemedAmount],
+          });
+          notifyTxSubmitted("Bridge approval", approvalHash);
+          await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+          notifyTxConfirmed("Bridge approval", approvalHash);
+        }
+
+        setTxStep("submitting");
+        const bridgeFee = await readLineaTokenBridgeFee(statusClient);
+        console.info("Linea TokenBridge call", {
+          functionName: "bridgeToken",
+          address: LINEA_TOKEN_BRIDGE_ADDRESS,
+          chainId: MAINNET_CHAIN_ID,
+          args: [exitStablecoinAddress, redeemedAmount, recipient],
+          value: bridgeFee,
+        });
+        const bridgeHash = await writeContractAsync({
+          abi: lineaTokenBridgeAbi,
+          address: LINEA_TOKEN_BRIDGE_ADDRESS,
+          chainId: MAINNET_CHAIN_ID,
+          functionName: "bridgeToken",
+          args: [exitStablecoinAddress, redeemedAmount, recipient],
+          value: bridgeFee,
+        });
+        notifyTxSubmitted("Linea bridge", bridgeHash);
+        await publicClient.waitForTransactionReceipt({ hash: bridgeHash });
+        const now = Date.now();
+        setLineaNativeBridgeRecords((current) =>
+          upsertLineaNativeBridgeRecord(current, {
+            txHash: bridgeHash,
+            account: accountAddress,
+            token: exitStablecoinAddress,
+            ticker: exitTicker,
+            amount: redeemedAmount.toString(),
+            recipient,
+            status: "submitted",
+            createdAt: now,
+            updatedAt: now,
+          }),
+        );
+        pushAlert({
+          type: "info",
+          title: "Linea bridge pending claim",
+          message: buildLineaNativeBridgeMessage(bridgeHash),
+          duration: 12_000,
+        });
+        clearProgress();
+      }
+
+      setFromAmount("");
+      await refetchStatusExitBalances();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Status withdrawal failed";
+      setTxError(message);
+      pushAlert({
+        type: "error",
+        title: "Status withdrawal failed",
+        message,
+      });
+    } finally {
+      setTxStep("idle");
+    }
+  };
+
   const handlePrimaryAction = async () => {
     if (!accountAddress) {
       return;
@@ -2945,7 +3988,8 @@ export function DepositSwap() {
       return;
     }
 
-    if (isPredepositRedeem) {
+    if (isPredepositRedeem && pendingCctpRecord) {
+      await handleMintCctpOnLinea();
       return;
     }
 
@@ -2991,6 +4035,11 @@ export function DepositSwap() {
 
     if (isDepositFlow) {
       await handleDeposit();
+      return;
+    }
+
+    if (isPredepositRedeem) {
+      await handleStatusExit();
       return;
     }
 
@@ -3121,9 +4170,18 @@ export function DepositSwap() {
         ? "Ethereum"
         : "Citrea"
       : "Ethereum";
-  const toChainLabel = isDepositFlow ? depositToChainLabel : "Ethereum";
-  const fromAssetLabelOverride =
-    !isDepositFlow && isCitreaReturnFlow && fromAssetType === "gusd"
+  const toChainLabel = isPredepositRedeem
+    ? LINEA_CHAIN_LABEL
+    : isDepositFlow
+      ? depositToChainLabel
+      : "Ethereum";
+  const fromAssetLabelOverride = isPredepositRedeem
+    ? isStatusExitCollateralResume
+      ? selectedTicker
+      : isStatusExitGunitResume
+        ? "GUnits"
+        : "Status predeposit"
+    : !isDepositFlow && isCitreaReturnFlow && fromAssetType === "gusd"
       ? isOnMainnet
         ? "GUSD"
         : "Citrea GUSD"
@@ -3137,7 +4195,11 @@ export function DepositSwap() {
   ) => {
     if (assetType === "stablecoin") {
       return (
-        <Select value={selectedTicker} onValueChange={handleStablecoinChange}>
+        <Select
+          value={selectedTicker}
+          onValueChange={handleStablecoinChange}
+          disabled={Boolean(statusExitProgress)}
+        >
           <SelectTrigger className="h-11 w-fit justify-start gap-2 px-3">
             {selectedStablecoin ? (
               <TokenIcon
@@ -3297,6 +4359,7 @@ export function DepositSwap() {
                   inputProps={{
                     placeholder: fromPlaceholder,
                     autoComplete: "off",
+                    disabled: isPredepositRedeem,
                     value: fromAmount,
                     onChange: (event) => {
                       setPostMintHref(null);
@@ -3309,15 +4372,16 @@ export function DepositSwap() {
                     onClick: canUseMax ? handleMaxClick : undefined,
                   }}
                 />
-                <button
-                  type="button"
-                  onClick={handleSwitchDirection}
-                  disabled={!canSwitchDirection}
-                  aria-label="Switch direction"
-                  className="mx-auto flex h-10 w-10 items-center justify-center rounded-full border border-border/60 bg-background/80 text-muted-foreground shadow-sm transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <ArrowUpDown className="h-4 w-4" />
-                </button>
+                {canSwitchDirection ? (
+                  <button
+                    type="button"
+                    onClick={handleSwitchDirection}
+                    aria-label="Switch direction"
+                    className="mx-auto flex h-10 w-10 items-center justify-center rounded-full border border-border/60 bg-background/80 text-muted-foreground shadow-sm transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  >
+                    <ArrowUpDown className="h-4 w-4" />
+                  </button>
+                ) : null}
                 <SwapAssetPanel
                   label="To"
                   chainLabel={toChainLabel}
@@ -3333,6 +4397,72 @@ export function DepositSwap() {
                   }}
                 />
               </div>
+              {isPredepositRedeem ? (
+                <div className="space-y-4 rounded-2xl border border-border/60 bg-background/70 p-4">
+                  <div className="space-y-1">
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
+                      Claim on Linea
+                    </p>
+                    <a
+                      href={STATUS_LINEA_ANNOUNCEMENT_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex text-xs font-medium text-foreground underline underline-offset-4"
+                    >
+                      Read the Status announcement
+                    </a>
+                  </div>
+                  <div className="space-y-3">
+                    <div className="rounded-xl border border-border/60 bg-background/70 p-3 text-xs text-muted-foreground">
+                      <span className="font-semibold text-foreground/80">
+                        Recipient:
+                      </span>{" "}
+                      {useCustomLineaRecipient
+                        ? "custom Linea address"
+                        : "same address on Linea"}
+                      {!useCustomLineaRecipient ? (
+                        <span className="mt-1 block">
+                          If this wallet is a multisig or contract, confirm it
+                          exists and is controllable on Linea, or set a
+                          different recipient.
+                        </span>
+                      ) : null}
+                    </div>
+                    <label className="flex items-center gap-2 text-xs font-medium text-foreground">
+                      <input
+                        type="checkbox"
+                        checked={useCustomLineaRecipient}
+                        onChange={(event) =>
+                          setUseCustomLineaRecipient(event.target.checked)
+                        }
+                        className="h-4 w-4 rounded border-border text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                      />
+                      Set another Linea recipient
+                    </label>
+                    {useCustomLineaRecipient ? (
+                      <input
+                        type="text"
+                        inputMode="text"
+                        placeholder="0x..."
+                        value={lineaRecipientInput}
+                        onChange={(event) =>
+                          setLineaRecipientInput(event.target.value)
+                        }
+                        className={cn(
+                          "h-10 w-full rounded-xl border border-border/80 bg-muted/30 px-3 font-mono text-[11px] text-foreground outline-none transition placeholder:text-muted-foreground/60 focus:border-primary/60 focus:bg-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                          !isCustomLineaRecipientValid &&
+                            "border-destructive/60 focus:border-destructive/70",
+                        )}
+                      />
+                    ) : null}
+                    {useCustomLineaRecipient && !isCustomLineaRecipientValid ? (
+                      <p className="text-xs text-destructive">
+                        Enter a valid EVM address.
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
               {isDepositFlow && depositRoute === "citrea" ? (
                 <div className="rounded-2xl border border-border/60 bg-background/70 p-4">
                   <div className="flex items-center justify-between gap-4">
@@ -3407,6 +4537,50 @@ export function DepositSwap() {
                   {pendingBridgeStatusLabel.slice(0, 1).toUpperCase() +
                     pendingBridgeStatusLabel.slice(1)}
                 </p>
+              ) : null}
+              {isPredepositRedeem && pendingCctpRecord ? (
+                <p className="text-center text-xs text-muted-foreground">
+                  {pendingCctpRecord.status === "submitted"
+                    ? "USDC burn confirmed. Waiting for Circle attestation."
+                    : activeChainId === LINEA_CHAIN_ID
+                      ? "Attestation ready. Mint USDC on Linea to finish."
+                      : "Attestation ready. Switch to Linea to mint USDC."}
+                </p>
+              ) : null}
+              {isPredepositRedeem && statusExitProgress ? (
+                <div className="rounded-xl border border-border/60 bg-background/70 p-3 text-center text-xs text-muted-foreground">
+                  {statusExitProgress.stage === "gunit"
+                    ? `Status withdrawal confirmed. Continue redeeming the stored GUnits into ${statusExitProgress.ticker}.`
+                    : `Status collateral redeemed. Continue bridging the stored ${statusExitProgress.ticker} amount to Linea.`}
+                </div>
+              ) : null}
+              {isPredepositRedeem && pendingLineaNativeBridgeRecord ? (
+                <div className="space-y-2 rounded-xl border border-border/60 bg-background/70 p-3 text-center text-xs text-muted-foreground">
+                  <p>
+                    {pendingLineaNativeBridgeRecord.ticker} bridge pending
+                    destination claim. The Ethereum bridge transaction is
+                    confirmed, but the Linea side may still need to be claimed
+                    before funds arrive.
+                  </p>
+                  <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
+                    <a
+                      href={LINEA_BRIDGE_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium text-foreground underline underline-offset-4"
+                    >
+                      Open Linea bridge
+                    </a>
+                    <a
+                      href={LINEASCAN_L1_TO_L2_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium text-foreground underline underline-offset-4"
+                    >
+                      View LineaScan deposits
+                    </a>
+                  </div>
+                </div>
               ) : null}
               {!pendingBridgeForRoute &&
               isCitreaReturnFlow &&

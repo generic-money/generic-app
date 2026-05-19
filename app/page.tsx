@@ -119,10 +119,10 @@ export default function HomePage() {
                 <div className="flex items-start justify-between gap-4">
                   <div className="space-y-1">
                     <h3 className="text-lg font-semibold">
-                      Status L2 predeposit vault
+                      Status L2 withdrawals
                     </h3>
                     <p className="text-xs text-muted-foreground">
-                      Early access predeposit vault.
+                      Withdraw predeposits into collateral.
                     </p>
                   </div>
                   <span className="flex h-10 w-10 items-center justify-center rounded-full border border-border/60 bg-background/80 text-primary shadow-sm">

@@ -99,6 +99,9 @@ type OpportunityRouteContextValue = {
 const OPPORTUNITY_STORAGE_KEY = "generic.opportunityRoute";
 const SWAP_FLOW_STORAGE_KEY = "generic.swapFlow";
 
+const getDefaultFlowForRoute = (route: OpportunityRoute): SwapFlow =>
+  route === "predeposit" ? "redeem" : "deposit";
+
 const OpportunityRouteContext = React.createContext<
   OpportunityRouteContextValue | undefined
 >(undefined);
@@ -161,7 +164,9 @@ export default function ContextProvider({
   const [route, setRoute] = React.useState<OpportunityRoute>(
     DEFAULT_OPPORTUNITY_ROUTE,
   );
-  const [flow, setFlow] = React.useState<SwapFlow>("deposit");
+  const [flow, setFlow] = React.useState<SwapFlow>(
+    getDefaultFlowForRoute(DEFAULT_OPPORTUNITY_ROUTE),
+  );
   const [redeemEntryRequest, setRedeemEntryRequest] =
     React.useState<RedeemEntryRequest | null>(null);
   const redeemEntryRequestIdRef = React.useRef(0);
@@ -178,14 +183,19 @@ export default function ContextProvider({
 
     if (routeFromUrl) {
       setRoute(routeFromUrl);
-      setFlow("deposit");
+      setFlow(getDefaultFlowForRoute(routeFromUrl));
       return;
     }
 
     const storedRoute = window.localStorage.getItem(OPPORTUNITY_STORAGE_KEY);
     if (storedRoute === "citrea" || storedRoute === "predeposit") {
       setRoute(storedRoute);
-      setFlow("deposit");
+      setFlow(getDefaultFlowForRoute(storedRoute));
+      return;
+    }
+
+    if (DEFAULT_OPPORTUNITY_ROUTE === "predeposit") {
+      setFlow("redeem");
       return;
     }
 
@@ -211,7 +221,7 @@ export default function ContextProvider({
       }
 
       setRoute(routeFromHash);
-      setFlow("deposit");
+      setFlow(getDefaultFlowForRoute(routeFromHash));
     };
 
     window.addEventListener("hashchange", handleHashChange);
@@ -247,6 +257,11 @@ export default function ContextProvider({
     [],
   );
 
+  const selectRoute = React.useCallback((nextRoute: OpportunityRoute) => {
+    setRoute(nextRoute);
+    setFlow(getDefaultFlowForRoute(nextRoute));
+  }, []);
+
   const initialState = cookieToInitialState(
     wagmiAdapter.wagmiConfig as Config,
     cookies,
@@ -255,13 +270,13 @@ export default function ContextProvider({
   const value = React.useMemo(
     () => ({
       route,
-      setRoute,
+      setRoute: selectRoute,
       flow,
       setFlow,
       redeemEntryRequest,
       requestRedeemEntry,
     }),
-    [flow, redeemEntryRequest, requestRedeemEntry, route],
+    [flow, redeemEntryRequest, requestRedeemEntry, route, selectRoute],
   );
 
   return (

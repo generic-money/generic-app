@@ -1,4 +1,11 @@
-import { render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ComponentProps, InputHTMLAttributes, ReactNode } from "react";
 import { DepositSwap } from "./deposit-swap";
 
@@ -205,6 +212,8 @@ const setOpportunityRoute = (
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.history.pushState({}, "", "/");
+  delete window.gmTxReview;
   lineaNativeBridgeMocks.loadLineaNativeBridgeRecords.mockReturnValue([]);
   lineaNativeBridgeMocks.pruneLineaNativeBridgeRecords.mockImplementation(
     (records) => records,
@@ -447,7 +456,9 @@ test("allows Status exits to continue from withdrawn GUnits", async () => {
       name: /continue redeem & bridge/i,
     }),
   ).toBeEnabled();
-  expect(screen.getByText(/status withdrawal confirmed/i)).toBeInTheDocument();
+  expect(
+    screen.getByText(/predeposit withdrawal confirmed/i),
+  ).toBeInTheDocument();
 });
 
 test("allows Status exits to continue from redeemed collateral", async () => {
@@ -492,4 +503,468 @@ test("allows Status exits to continue from redeemed collateral", async () => {
     await screen.findByRole("button", { name: /continue bridge/i }),
   ).toBeEnabled();
   expect(screen.getByText(/status collateral redeemed/i)).toBeInTheDocument();
+});
+
+test("exposes URL-gated Status tx review helpers", async () => {
+  window.history.pushState({}, "", "/deposit?gmTxReview=1");
+  setOpportunityRoute("predeposit", "redeem");
+  wagmiMocks.useAccount.mockReturnValue({ address: ACCOUNT });
+  wagmiMocks.useReadContract.mockImplementation(
+    ({ functionName }: { functionName?: string }) => ({
+      data: functionName === "getPredeposit" ? BigInt(1_000_000) : undefined,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    }),
+  );
+  hookMocks.useErc4626Preview.mockReturnValue({
+    quote: "1",
+    rawQuote: BigInt(1_000_000),
+    parsedAmount: BigInt(1_000_000),
+    isError: false,
+    isFetching: false,
+    isLoading: false,
+  });
+  const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
+
+  render(<DepositSwap />);
+
+  await waitFor(() => expect(window.gmTxReview).toBeDefined());
+  const txReview = window.gmTxReview;
+  if (!txReview) {
+    throw new Error("Expected tx review helper to be installed");
+  }
+
+  let record: unknown;
+  act(() => {
+    record = txReview.advanceToGUnits({ shares: "1000000" });
+  });
+
+  expect(record).toEqual(
+    expect.objectContaining({
+      account: ACCOUNT,
+      stage: "gunit",
+      ticker: "USDC",
+      shares: "1000000",
+      genericUnitTokenAddress: GENERIC_UNIT,
+      stablecoinAddress: USDC,
+      vaultAddress: USDC_VAULT,
+    }),
+  );
+  expect(consoleInfo).toHaveBeenCalledWith(
+    "[gmTxReview]",
+    expect.objectContaining({
+      phase: "manual-advance",
+      step: "status.manual.gunits",
+    }),
+  );
+
+  consoleInfo.mockRestore();
+});
+
+test("lets review mode skip the predeposit availability check", () => {
+  window.history.pushState(
+    {},
+    "",
+    "/deposit?gmTxReview=1&gmSkip=predeposit,balance",
+  );
+  setOpportunityRoute("predeposit", "redeem");
+  wagmiMocks.useAccount.mockReturnValue({ address: ACCOUNT });
+  wagmiMocks.useReadContract.mockImplementation(
+    ({ functionName }: { functionName?: string }) => ({
+      data: functionName === "getPredeposit" ? BigInt(0) : undefined,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    }),
+  );
+  hookMocks.useErc4626Preview.mockReturnValue({
+    quote: "1",
+    rawQuote: BigInt(1_000_000),
+    parsedAmount: BigInt(1_000_000),
+    isError: false,
+    isFetching: false,
+    isLoading: false,
+  });
+  hookMocks.useRedeemVaultLiquidity.mockReturnValue({
+    status: "idle",
+    selectedVault: {
+      ticker: "USDC",
+      tokenAddress: USDC,
+      vaultAddress: USDC_VAULT,
+      decimals: 6,
+      availableAmountRaw: "1000000",
+      availableFormatted: "1",
+      normalizedAmountRaw: "1000000000000000000",
+    },
+    data: { vaults: [] },
+    refresh: vi.fn(),
+  });
+
+  render(<DepositSwap />);
+
+  expect(
+    screen.getByRole("button", { name: /withdraw, redeem & bridge/i }),
+  ).toBeEnabled();
+});
+
+test("logs Status tx review writes in transaction order", async () => {
+  window.history.pushState({}, "", "/deposit?gmTxReview=1&gmSkip=attestation");
+  setOpportunityRoute("predeposit", "redeem");
+  wagmiMocks.useAccount.mockReturnValue({ address: ACCOUNT });
+  wagmiMocks.useReadContract.mockImplementation(
+    ({ functionName }: { functionName?: string }) => ({
+      data: functionName === "getPredeposit" ? BigInt(1_000_000) : undefined,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    }),
+  );
+  hookMocks.useErc4626Preview.mockReturnValue({
+    quote: "1",
+    rawQuote: BigInt(1_000_000),
+    parsedAmount: BigInt(1_000_000),
+    isError: false,
+    isFetching: false,
+    isLoading: false,
+  });
+  hookMocks.useRedeemVaultLiquidity.mockReturnValue({
+    status: "idle",
+    selectedVault: {
+      ticker: "USDC",
+      tokenAddress: USDC,
+      vaultAddress: USDC_VAULT,
+      decimals: 6,
+      availableAmountRaw: "1000000",
+      availableFormatted: "1",
+      normalizedAmountRaw: "1000000000000000000",
+    },
+    data: { vaults: [] },
+    refresh: vi.fn(),
+  });
+
+  let genericBalanceReads = 0;
+  let stablecoinBalanceReads = 0;
+  const readContract = vi.fn(
+    ({
+      address,
+      functionName,
+      args,
+    }: {
+      address?: string;
+      functionName?: string;
+      args?: readonly unknown[];
+    }) => {
+      if (functionName === "balanceOf" && address === GENERIC_UNIT) {
+        genericBalanceReads += 1;
+        return genericBalanceReads === 1 ? BigInt(0) : BigInt(1_000_000);
+      }
+      if (functionName === "balanceOf" && address === USDC) {
+        stablecoinBalanceReads += 1;
+        return stablecoinBalanceReads === 1 ? BigInt(0) : BigInt(1_000_000);
+      }
+      if (functionName === "allowance" && args?.[1] === USDC_VAULT) {
+        return BigInt(0);
+      }
+      if (functionName === "allowance") {
+        return BigInt(1_000_000);
+      }
+      if (functionName === "totalAssets") {
+        return BigInt(1_000_000);
+      }
+      if (functionName === "maxWithdraw") {
+        return BigInt(1_000_000);
+      }
+      if (functionName === "maxRedeem") {
+        return BigInt(1_000_000);
+      }
+      if (functionName === "previewRedeem") {
+        return BigInt(1_000_000);
+      }
+      return BigInt(0);
+    },
+  );
+  const waitForTransactionReceipt = vi.fn().mockResolvedValue({});
+  wagmiMocks.usePublicClient.mockReturnValue({
+    readContract,
+    waitForTransactionReceipt,
+  });
+  const writeContractAsync = vi
+    .fn()
+    .mockResolvedValueOnce(
+      "0x0000000000000000000000000000000000000000000000000000000000000001",
+    )
+    .mockResolvedValueOnce(
+      "0x0000000000000000000000000000000000000000000000000000000000000002",
+    )
+    .mockResolvedValueOnce(
+      "0x0000000000000000000000000000000000000000000000000000000000000003",
+    )
+    .mockResolvedValueOnce(
+      "0x0000000000000000000000000000000000000000000000000000000000000004",
+    );
+  wagmiMocks.useWriteContract.mockReturnValue({ writeContractAsync });
+  const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
+  const user = userEvent.setup();
+
+  render(<DepositSwap />);
+
+  await user.click(
+    screen.getByRole("button", { name: /withdraw, redeem & bridge/i }),
+  );
+
+  await waitFor(() => expect(writeContractAsync).toHaveBeenCalledTimes(4));
+  expect(writeContractAsync.mock.calls.map(([request]) => request)).toEqual([
+    expect.objectContaining({
+      address: "0x0503F2C5A1a4b72450c6Cfa790F2097CF5cB6a01",
+      functionName: "withdrawPredeposit",
+      args: [
+        STATUS_CHAIN_NICKNAME,
+        ACCOUNT_BYTES32,
+        ACCOUNT,
+        expect.any(String),
+      ],
+    }),
+    expect.objectContaining({
+      address: GENERIC_UNIT,
+      functionName: "approve",
+      args: [USDC_VAULT, BigInt(1_000_000)],
+    }),
+    expect.objectContaining({
+      address: USDC_VAULT,
+      functionName: "redeem",
+      args: [BigInt(1_000_000), ACCOUNT, ACCOUNT],
+    }),
+    expect.objectContaining({
+      functionName: "depositForBurn",
+      args: [
+        BigInt(1_000_000),
+        11,
+        ACCOUNT_BYTES32,
+        USDC,
+        expect.any(String),
+        BigInt(0),
+        2000,
+      ],
+    }),
+  ]);
+  expect(
+    consoleInfo.mock.calls
+      .filter(([label]) => label === "[gmTxReview]")
+      .map(([, event]) => event.step),
+  ).toEqual(
+    expect.arrayContaining([
+      "status.withdrawPredeposit",
+      "status.redeem.approve",
+      "status.redeem",
+      "status.cctp.bridge",
+    ]),
+  );
+
+  consoleInfo.mockRestore();
+});
+
+test("pauses after each dry-submitted Status tx review write", async () => {
+  window.history.pushState(
+    {},
+    "",
+    "/deposit?gmTxReview=1&gmSkip=send,balance,liquidity,attestation",
+  );
+  setOpportunityRoute("predeposit", "redeem");
+  wagmiMocks.useAccount.mockReturnValue({ address: ACCOUNT });
+  wagmiMocks.useReadContract.mockImplementation(
+    ({ functionName }: { functionName?: string }) => ({
+      data: functionName === "getPredeposit" ? BigInt(1_000_000) : undefined,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    }),
+  );
+  hookMocks.useErc4626Preview.mockReturnValue({
+    quote: "1",
+    rawQuote: BigInt(1_000_000),
+    parsedAmount: BigInt(1_000_000),
+    isError: false,
+    isFetching: false,
+    isLoading: false,
+  });
+  hookMocks.useRedeemVaultLiquidity.mockReturnValue({
+    status: "idle",
+    selectedVault: {
+      ticker: "USDC",
+      tokenAddress: USDC,
+      vaultAddress: USDC_VAULT,
+      decimals: 6,
+      availableAmountRaw: "1000000",
+      availableFormatted: "1",
+      normalizedAmountRaw: "1000000000000000000",
+    },
+    data: { vaults: [] },
+    refresh: vi.fn(),
+  });
+
+  const readContract = vi.fn(({ functionName }: { functionName?: string }) => {
+    if (functionName === "allowance") {
+      return BigInt(0);
+    }
+    if (
+      functionName === "totalAssets" ||
+      functionName === "maxWithdraw" ||
+      functionName === "maxRedeem" ||
+      functionName === "previewRedeem"
+    ) {
+      return BigInt(1_000_000);
+    }
+    return BigInt(0);
+  });
+  const waitForTransactionReceipt = vi.fn();
+  wagmiMocks.usePublicClient.mockReturnValue({
+    readContract,
+    waitForTransactionReceipt,
+  });
+  const writeContractAsync = vi.fn();
+  wagmiMocks.useWriteContract.mockReturnValue({ writeContractAsync });
+  const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
+  const user = userEvent.setup();
+  const drySubmitSteps = () =>
+    consoleInfo.mock.calls
+      .filter(
+        ([label, event]) =>
+          label === "[gmTxReview]" && event?.phase === "dry-submit",
+      )
+      .map(([, event]) => event.step);
+  const drySubmitHashes = () =>
+    consoleInfo.mock.calls
+      .filter(
+        ([label, event]) =>
+          label === "[gmTxReview]" && event?.phase === "dry-submit",
+      )
+      .map(([, event]) => event.txHash);
+  const clickPrimaryAction = async () => {
+    await user.click(
+      screen.getByRole("button", {
+        name: /withdraw, redeem & bridge|continue redeem & bridge|continue bridge/i,
+      }),
+    );
+  };
+
+  render(<DepositSwap />);
+
+  await clickPrimaryAction();
+  await waitFor(() =>
+    expect(drySubmitSteps()).toEqual(["status.withdrawPredeposit"]),
+  );
+  await waitFor(() => expect(window.gmTxReview).toBeDefined());
+  act(() => {
+    window.gmTxReview?.advanceToGUnits({ shares: "1000000" });
+  });
+
+  await clickPrimaryAction();
+  await waitFor(() =>
+    expect(drySubmitSteps()).toEqual([
+      "status.withdrawPredeposit",
+      "status.redeem.approve",
+    ]),
+  );
+
+  await clickPrimaryAction();
+  await waitFor(() =>
+    expect(drySubmitSteps()).toEqual([
+      "status.withdrawPredeposit",
+      "status.redeem.approve",
+      "status.redeem",
+    ]),
+  );
+  act(() => {
+    window.gmTxReview?.advanceToCollateral({ amount: "1000000" });
+  });
+
+  await clickPrimaryAction();
+  await waitFor(() =>
+    expect(drySubmitSteps()).toEqual([
+      "status.withdrawPredeposit",
+      "status.redeem.approve",
+      "status.redeem",
+      "status.cctp.approve",
+    ]),
+  );
+
+  await clickPrimaryAction();
+
+  await waitFor(() =>
+    expect(drySubmitSteps()).toEqual([
+      "status.withdrawPredeposit",
+      "status.redeem.approve",
+      "status.redeem",
+      "status.cctp.approve",
+      "status.cctp.bridge",
+    ]),
+  );
+  expect(drySubmitHashes()).toEqual([
+    "0x0000000000000000000000000000000000000000000000000000000000000001",
+    "0x0000000000000000000000000000000000000000000000000000000000000002",
+    "0x0000000000000000000000000000000000000000000000000000000000000003",
+    "0x0000000000000000000000000000000000000000000000000000000000000004",
+    "0x0000000000000000000000000000000000000000000000000000000000000005",
+  ]);
+  expect(writeContractAsync).not.toHaveBeenCalled();
+  expect(waitForTransactionReceipt).not.toHaveBeenCalled();
+
+  consoleInfo.mockRestore();
+});
+
+test("guards the primary action against duplicate wallet prompts", async () => {
+  setOpportunityRoute("predeposit", "redeem");
+  wagmiMocks.useAccount.mockReturnValue({ address: ACCOUNT });
+  wagmiMocks.useReadContract.mockImplementation(
+    ({ functionName }: { functionName?: string }) => ({
+      data: functionName === "getPredeposit" ? BigInt(1_000_000) : undefined,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    }),
+  );
+  hookMocks.useErc4626Preview.mockReturnValue({
+    quote: "1",
+    rawQuote: BigInt(1_000_000),
+    parsedAmount: BigInt(1_000_000),
+    isError: false,
+    isFetching: false,
+    isLoading: false,
+  });
+  hookMocks.useRedeemVaultLiquidity.mockReturnValue({
+    status: "idle",
+    selectedVault: {
+      ticker: "USDC",
+      tokenAddress: USDC,
+      vaultAddress: USDC_VAULT,
+      decimals: 6,
+      availableAmountRaw: "1000000",
+      availableFormatted: "1",
+      normalizedAmountRaw: "1000000000000000000",
+    },
+    data: { vaults: [] },
+    refresh: vi.fn(),
+  });
+  wagmiMocks.usePublicClient.mockReturnValue({
+    readContract: vi.fn(({ functionName }: { functionName?: string }) => {
+      if (functionName === "balanceOf") {
+        return BigInt(0);
+      }
+      return BigInt(1_000_000);
+    }),
+    waitForTransactionReceipt: vi.fn(),
+  });
+  const writeContractAsync = vi.fn(() => new Promise(() => {}));
+  wagmiMocks.useWriteContract.mockReturnValue({ writeContractAsync });
+
+  render(<DepositSwap />);
+
+  const button = screen.getByRole("button", {
+    name: /withdraw, redeem & bridge/i,
+  });
+  fireEvent.click(button);
+  fireEvent.click(button);
+
+  await waitFor(() => expect(writeContractAsync).toHaveBeenCalledTimes(1));
 });

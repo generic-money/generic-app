@@ -121,6 +121,13 @@ import {
   sortLiquidityVaults,
 } from "./redeem-liquidity";
 import { RedeemLiquidityNotice } from "./redeem-liquidity-notice";
+import {
+  getStatusTxReviewConfig,
+  hasStatusTxReviewSkip,
+  logStatusTxReviewEvent,
+  parseStatusTxReviewAmount,
+  type StatusTxReviewRequest,
+} from "./status-tx-review";
 import { SwapAssetPanel } from "./swap-asset-panel";
 import { formatBalanceText, formatTokenAmount } from "./utils/format";
 import { VaultAvailabilityDialog } from "./vault-availability-dialog";
@@ -300,6 +307,47 @@ const parseStoredAmount = (value?: string) => {
 const formatTxHash = (hash: HexBytes) =>
   `${hash.slice(0, 6)}...${hash.slice(-4)}`;
 
+const getTxExplorer = (chainId?: number) => {
+  if (chainId === LINEA_CHAIN_ID) {
+    return {
+      name: "LineaScan",
+      href: (hash: HexBytes) => `https://lineascan.build/tx/${hash}`,
+    };
+  }
+
+  if (chainId === MAINNET_CHAIN_ID) {
+    return {
+      name: "Etherscan",
+      href: (hash: HexBytes) => `https://etherscan.io/tx/${hash}`,
+    };
+  }
+
+  return null;
+};
+
+const buildTxHashMessage = (hash: HexBytes, chainId?: number) => {
+  const explorer = getTxExplorer(chainId);
+
+  if (!explorer) {
+    return `Hash ${formatTxHash(hash)}`;
+  }
+
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      <span>Hash {formatTxHash(hash)}</span>
+      <span className="text-muted-foreground">·</span>
+      <a
+        href={explorer.href(hash)}
+        target="_blank"
+        rel="noreferrer"
+        className="font-medium text-foreground underline underline-offset-4"
+      >
+        {explorer.name}
+      </a>
+    </span>
+  );
+};
+
 const formatStablecoinAvailability = (
   amount: bigint,
   decimals: number | undefined,
@@ -457,11 +505,12 @@ const notifyTxSubmitted = (
   label: string,
   hash: HexBytes,
   messageOverride?: ReactNode,
+  chainId?: number,
 ) => {
   pushAlert({
     type: "info",
     title: `${label} submitted`,
-    message: messageOverride ?? `Hash ${formatTxHash(hash)}`,
+    message: messageOverride ?? buildTxHashMessage(hash, chainId),
   });
 };
 
@@ -469,11 +518,12 @@ const notifyTxConfirmed = (
   label: string,
   hash: HexBytes,
   messageOverride?: ReactNode,
+  chainId?: number,
 ) => {
   pushAlert({
     type: "success",
     title: `${label} confirmed`,
-    message: messageOverride ?? `Hash ${formatTxHash(hash)}`,
+    message: messageOverride ?? buildTxHashMessage(hash, chainId),
   });
 };
 
@@ -616,6 +666,15 @@ export function DepositSwap() {
   const { address: accountAddress } = useAccount();
   const activeChainId = useChainId();
   const chainName = getChainNameById(activeChainId);
+  const statusTxReviewConfig = useMemo(() => getStatusTxReviewConfig(), []);
+  const statusTxReviewHasSkip = useCallback(
+    (skip: Parameters<typeof hasStatusTxReviewSkip>[1]) =>
+      hasStatusTxReviewSkip(statusTxReviewConfig, skip),
+    [statusTxReviewConfig],
+  );
+  const primaryActionInFlightRef = useRef(false);
+  const statusTxReviewDrySendNonceRef = useRef(1);
+  const statusTxReviewDrySubmittedStepsRef = useRef(new Set<string>());
   const {
     route: depositRoute,
     setRoute: setDepositRoute,
@@ -814,7 +873,7 @@ export function DepositSwap() {
     : isCitreaReturnFlow
       ? "Bridge Citrea GUSD back to mainnet, then redeem into your selected stablecoin."
       : isPredepositRedeem
-        ? "Withdraw your Status predeposit, redeem into collateral, and optionally bridge it to Linea."
+        ? "Withdraw your Status predeposit, redeem into collateral, and bridge it to Linea to claim your rewards."
         : isGunitRedeem
           ? "Redeem GUnits back into your selected stablecoin."
           : "Redeem GUSD back into your selected stablecoin.";
@@ -1740,9 +1799,12 @@ export function DepositSwap() {
       ) ?? null
     );
   }, [accountAddress, lineaNativeBridgeRecords]);
-  const pendingCctpAttestationReady =
-    pendingCctpRecord?.status === "attested" &&
-    Boolean(pendingCctpRecord.message && pendingCctpRecord.attestation);
+  const pendingCctpAttestationReady = Boolean(
+    pendingCctpRecord &&
+      (pendingCctpRecord.status === "attested"
+        ? pendingCctpRecord.message && pendingCctpRecord.attestation
+        : statusTxReviewHasSkip("attestation")),
+  );
   const customLineaRecipient = lineaRecipientInput.trim();
   const isCustomLineaRecipientValid =
     !useCustomLineaRecipient || isAddress(customLineaRecipient);
@@ -1750,6 +1812,213 @@ export function DepositSwap() {
     useCustomLineaRecipient && isAddress(customLineaRecipient)
       ? (customLineaRecipient as HexAddress)
       : accountAddress;
+
+  useEffect(() => {
+    if (!statusTxReviewConfig.active || typeof window === "undefined") {
+      return;
+    }
+
+    const requireStatusExitContext = () => {
+      if (
+        !accountAddress ||
+        !statusPredepositChainNickname ||
+        !predepositRecipient ||
+        !genericUnitTokenAddress ||
+        !stablecoinAddress ||
+        !vaultAddress
+      ) {
+        throw new Error(
+          "Status tx review requires a connected account and selected Status exit context.",
+        );
+      }
+
+      return {
+        accountAddress,
+        chainNickname: statusPredepositChainNickname,
+        genericUnitTokenAddress,
+        stablecoinAddress,
+        vaultAddress,
+      };
+    };
+
+    const buildProgressRecord = ({
+      stage,
+      amount,
+    }: {
+      stage: StatusExitProgressRecord["stage"];
+      amount: bigint;
+    }): StatusExitProgressRecord => {
+      const context = requireStatusExitContext();
+      const now = Date.now();
+
+      return {
+        account: context.accountAddress,
+        stage,
+        ticker: selectedTicker,
+        chainNickname: context.chainNickname,
+        remoteRecipient:
+          statusExitProgress?.remoteRecipient ?? predepositRecipient,
+        genericUnitTokenAddress: context.genericUnitTokenAddress,
+        stablecoinAddress: context.stablecoinAddress,
+        vaultAddress: context.vaultAddress,
+        bridgeRequested: true,
+        bridgeRecipient: lineaRecipient,
+        shares: stage === "gunit" ? amount.toString() : undefined,
+        collateralAmount:
+          stage === "collateral" ? amount.toString() : undefined,
+        createdAt: statusExitProgress?.createdAt ?? now,
+        updatedAt: now,
+      };
+    };
+
+    const getSnapshot = () => ({
+      active: true as const,
+      skips: Array.from(statusTxReviewConfig.skips),
+      account: accountAddress ?? null,
+      route: depositRoute,
+      flow: effectiveFlow,
+      selectedTicker,
+      fromAmount,
+      parsedAmount: parsedAmount?.toString() ?? null,
+      statusPredepositAmount: statusPredepositAmount?.toString() ?? null,
+      statusExitProgress,
+      pendingCctpRecord,
+    });
+
+    const consoleApi = {
+      status: () => {
+        const snapshot = getSnapshot();
+        logStatusTxReviewEvent(statusTxReviewConfig, {
+          step: "status.snapshot",
+          phase: "manual-advance",
+          state: snapshot,
+        });
+        return snapshot;
+      },
+      advanceToGUnits: (input: {
+        shares: bigint | number | string;
+        txHash?: HexData;
+      }) => {
+        const shares = parseStatusTxReviewAmount(input.shares, "shares");
+        const record = buildProgressRecord({ stage: "gunit", amount: shares });
+        setStatusExitProgressRecords((current) =>
+          upsertStatusExitProgressRecord(current, record),
+        );
+        logStatusTxReviewEvent(statusTxReviewConfig, {
+          step: "status.manual.gunits",
+          phase: "manual-advance",
+          txHash: input.txHash,
+          state: { record },
+        });
+        return record;
+      },
+      advanceToCollateral: (input: {
+        amount: bigint | number | string;
+        txHash?: HexData;
+      }) => {
+        const amount = parseStatusTxReviewAmount(input.amount, "amount");
+        const record = buildProgressRecord({ stage: "collateral", amount });
+        setStatusExitProgressRecords((current) =>
+          upsertStatusExitProgressRecord(current, record),
+        );
+        logStatusTxReviewEvent(statusTxReviewConfig, {
+          step: "status.manual.collateral",
+          phase: "manual-advance",
+          txHash: input.txHash,
+          state: { record },
+        });
+        return record;
+      },
+      markBridgeSubmitted: (input: {
+        amount: bigint | number | string;
+        txHash: HexData;
+        recipient?: HexAddress;
+      }) => {
+        const context = requireStatusExitContext();
+        const amount = parseStatusTxReviewAmount(input.amount, "amount");
+        const now = Date.now();
+        const record = {
+          txHash: input.txHash,
+          account: context.accountAddress,
+          amount: amount.toString(),
+          recipient:
+            input.recipient ?? lineaRecipient ?? context.accountAddress,
+          sourceDomain: CCTP_ETHEREUM_DOMAIN,
+          destinationDomain: CCTP_LINEA_DOMAIN,
+          status: "submitted" as const,
+          createdAt: now,
+          updatedAt: now,
+        };
+
+        setCctpBridgeRecords((current) =>
+          upsertCctpBridgeRecord(current, record),
+        );
+        logStatusTxReviewEvent(statusTxReviewConfig, {
+          step: "status.manual.bridgeSubmitted",
+          phase: "manual-advance",
+          txHash: input.txHash,
+          state: { record },
+        });
+        return record;
+      },
+      clear: () => {
+        statusTxReviewDrySubmittedStepsRef.current.clear();
+        statusTxReviewDrySendNonceRef.current = 1;
+        setTxError(null);
+        setTxStep("idle");
+
+        if (accountAddress) {
+          setStatusExitProgressRecords((current) =>
+            clearStatusExitProgressRecord(current, accountAddress),
+          );
+          setCctpBridgeRecords((current) =>
+            current.filter(
+              (record) =>
+                record.account.toLowerCase() !== accountAddress.toLowerCase(),
+            ),
+          );
+        } else {
+          setStatusExitProgressRecords([]);
+          setCctpBridgeRecords([]);
+        }
+        logStatusTxReviewEvent(statusTxReviewConfig, {
+          step: "status.manual.clear",
+          phase: "manual-advance",
+        });
+      },
+    };
+
+    window.gmTxReview = consoleApi;
+    logStatusTxReviewEvent(statusTxReviewConfig, {
+      step: "status.console.ready",
+      phase: "manual-advance",
+      state: getSnapshot(),
+    });
+
+    return () => {
+      if (window.gmTxReview === consoleApi) {
+        delete window.gmTxReview;
+      }
+    };
+  }, [
+    accountAddress,
+    depositRoute,
+    effectiveFlow,
+    fromAmount,
+    genericUnitTokenAddress,
+    lineaRecipient,
+    parsedAmount,
+    pendingCctpRecord,
+    predepositRecipient,
+    selectedTicker,
+    stablecoinAddress,
+    statusExitProgress,
+    statusPredepositAmount,
+    statusPredepositChainNickname,
+    statusTxReviewConfig,
+    vaultAddress,
+  ]);
+
   const isBridgeToCitreaPending =
     bridgeStakeState === "bridging" ||
     bridgeStakeState === "waiting" ||
@@ -2007,7 +2276,11 @@ export function DepositSwap() {
   }, [pendingLzPollKey]);
 
   useEffect(() => {
-    if (!pendingCctpRecord || pendingCctpRecord.status !== "submitted") {
+    if (
+      !pendingCctpRecord ||
+      pendingCctpRecord.status !== "submitted" ||
+      statusTxReviewHasSkip("attestation")
+    ) {
       return;
     }
 
@@ -2065,7 +2338,7 @@ export function DepositSwap() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [pendingCctpRecord]);
+  }, [pendingCctpRecord, statusTxReviewHasSkip]);
 
   useEffect(() => {
     if (
@@ -2187,10 +2460,13 @@ export function DepositSwap() {
 
     if (isPredepositRedeem && pendingCctpRecord) {
       if (txStep === "submitting") {
-        return { label: "Minting USDC…", disabled: true };
+        return { label: "Claiming USDC…", disabled: true };
       }
 
-      if (pendingCctpRecord.status === "submitted") {
+      if (
+        pendingCctpRecord.status === "submitted" &&
+        !statusTxReviewHasSkip("attestation")
+      ) {
         return { label: "Waiting for Circle attestation…", disabled: true };
       }
 
@@ -2198,7 +2474,7 @@ export function DepositSwap() {
         return { label: `Switch to ${LINEA_CHAIN_LABEL}`, disabled: false };
       }
 
-      return { label: "Mint USDC on Linea", disabled: false };
+      return { label: "Claim USDC on Linea", disabled: false };
     }
 
     if (isCitreaReturnFlow && isOnMainnet && !citreaReturnReadyForRedeem) {
@@ -2245,11 +2521,21 @@ export function DepositSwap() {
         ) {
           return { label: "Collateral unavailable", disabled: true };
         }
-      } else if (isStatusPredepositLoading) {
+      } else if (
+        isStatusPredepositLoading &&
+        !statusTxReviewHasSkip("predeposit")
+      ) {
         return { label: "Checking predeposit…", disabled: true };
-      } else if (isStatusPredepositError || statusPredepositAmount == null) {
+      } else if (
+        (isStatusPredepositError || statusPredepositAmount == null) &&
+        !statusTxReviewHasSkip("predeposit")
+      ) {
         return { label: "Predeposit unavailable", disabled: true };
-      } else if (statusPredepositAmount <= ZERO_AMOUNT) {
+      } else if (
+        statusPredepositAmount != null &&
+        statusPredepositAmount <= ZERO_AMOUNT &&
+        !statusTxReviewHasSkip("predeposit")
+      ) {
         if (pendingLineaNativeBridgeRecord) {
           return { label: "USDT bridge pending claim", disabled: true };
         }
@@ -2311,7 +2597,7 @@ export function DepositSwap() {
       return { label: "Enter amount", disabled: true };
     }
 
-    if (insufficientBalance) {
+    if (insufficientBalance && !statusTxReviewHasSkip("balance")) {
       return { label: "Insufficient balance", disabled: true };
     }
 
@@ -2401,6 +2687,7 @@ export function DepositSwap() {
     statusExitProgressCollateralAmount,
     statusExitProgressShares,
     statusPredepositAmount,
+    statusTxReviewHasSkip,
     switchChainAsync,
     txStep,
     vaultAddress,
@@ -2662,6 +2949,117 @@ export function DepositSwap() {
       stablecoinDecimals,
       redeemVaultLiquidity.refresh,
       refetchRedeemBalances,
+    ],
+  );
+
+  const logReviewedStatusWrite = useCallback(
+    (
+      step: string,
+      request: StatusTxReviewRequest,
+      state?: Record<string, unknown>,
+    ) => {
+      logStatusTxReviewEvent(statusTxReviewConfig, {
+        step,
+        phase: "before-write",
+        request,
+        state: {
+          selectedTicker,
+          account: accountAddress,
+          skips: Array.from(statusTxReviewConfig.skips),
+          ...state,
+        },
+      });
+    },
+    [accountAddress, selectedTicker, statusTxReviewConfig],
+  );
+
+  const logReviewedStatusSubmission = useCallback(
+    (step: string, txHash: HexBytes) => {
+      logStatusTxReviewEvent(statusTxReviewConfig, {
+        step,
+        phase: "submitted",
+        txHash,
+      });
+    },
+    [statusTxReviewConfig],
+  );
+
+  const waitForReviewedStatusReceipt = useCallback(
+    async ({
+      hash,
+      label,
+      step,
+      chainId,
+    }: {
+      hash: HexBytes;
+      label: string;
+      step: string;
+      chainId?: number;
+    }) => {
+      const skipReason = statusTxReviewHasSkip("send")
+        ? "gmSkip=send"
+        : statusTxReviewHasSkip("receipt")
+          ? "gmSkip=receipt"
+          : null;
+
+      if (skipReason) {
+        logStatusTxReviewEvent(statusTxReviewConfig, {
+          step,
+          phase: "skipped",
+          txHash: hash,
+          reason: skipReason,
+        });
+        return false;
+      }
+
+      await publicClient?.waitForTransactionReceipt({ hash });
+      notifyTxConfirmed(label, hash, undefined, chainId);
+      logStatusTxReviewEvent(statusTxReviewConfig, {
+        step,
+        phase: "confirmed",
+        txHash: hash,
+      });
+      return true;
+    },
+    [publicClient, statusTxReviewConfig, statusTxReviewHasSkip],
+  );
+
+  const submitReviewedStatusWrite = useCallback(
+    async (
+      step: string,
+      request: StatusTxReviewRequest,
+      submit: () => Promise<HexBytes>,
+      state?: Record<string, unknown>,
+    ) => {
+      logReviewedStatusWrite(step, request, state);
+
+      if (statusTxReviewHasSkip("send")) {
+        const nonce = statusTxReviewDrySendNonceRef.current;
+        statusTxReviewDrySendNonceRef.current += 1;
+        const txHash = `0x${nonce.toString(16).padStart(64, "0")}` as HexBytes;
+        statusTxReviewDrySubmittedStepsRef.current.add(step);
+
+        logStatusTxReviewEvent(statusTxReviewConfig, {
+          step,
+          phase: "dry-submit",
+          request,
+          txHash,
+          reason: "gmSkip=send",
+          state,
+        });
+
+        return null;
+      }
+
+      const txHash = await submit();
+      logReviewedStatusSubmission(step, txHash);
+      return txHash;
+    },
+    [
+      logReviewedStatusSubmission,
+      logReviewedStatusWrite,
+      statusTxReviewConfig,
+      statusTxReviewHasSkip,
     ],
   );
 
@@ -3397,7 +3795,7 @@ export function DepositSwap() {
     }
   };
 
-  const handleMintCctpOnLinea = async () => {
+  const handleClaimCctpOnLinea = async () => {
     if (!pendingCctpRecord || !accountAddress) {
       return;
     }
@@ -3413,11 +3811,14 @@ export function DepositSwap() {
       return;
     }
 
-    if (
-      !publicClient ||
-      !pendingCctpRecord.message ||
-      !pendingCctpRecord.attestation
-    ) {
+    const cctpMessage =
+      pendingCctpRecord.message ??
+      (statusTxReviewHasSkip("attestation") ? ZERO_BYTES32 : undefined);
+    const cctpAttestation =
+      pendingCctpRecord.attestation ??
+      (statusTxReviewHasSkip("attestation") ? ZERO_BYTES32 : undefined);
+
+    if (!publicClient || !cctpMessage || !cctpAttestation) {
       return;
     }
 
@@ -3425,22 +3826,42 @@ export function DepositSwap() {
     setTxStep("submitting");
 
     try {
-      console.info("CCTP receive call", {
+      const receiveArgs = [cctpMessage, cctpAttestation] as const;
+      console.info("CCTP claim call", {
         functionName: "receiveMessage",
         address: CCTP_MESSAGE_TRANSMITTER_V2_ADDRESS,
         chainId: LINEA_CHAIN_ID,
         txHash: pendingCctpRecord.txHash,
       });
-      const mintHash = await writeContractAsync({
-        abi: cctpMessageTransmitterV2Abi,
+      const receiveRequest = {
         address: CCTP_MESSAGE_TRANSMITTER_V2_ADDRESS,
         chainId: LINEA_CHAIN_ID,
         functionName: "receiveMessage",
-        args: [pendingCctpRecord.message, pendingCctpRecord.attestation],
+        args: receiveArgs,
+      } as const satisfies StatusTxReviewRequest;
+      const claimHash = await submitReviewedStatusWrite(
+        "status.cctp.claim",
+        receiveRequest,
+        () =>
+          writeContractAsync({
+            abi: cctpMessageTransmitterV2Abi,
+            address: CCTP_MESSAGE_TRANSMITTER_V2_ADDRESS,
+            chainId: LINEA_CHAIN_ID,
+            functionName: "receiveMessage",
+            args: receiveArgs,
+          }),
+        { sourceTxHash: pendingCctpRecord.txHash },
+      );
+      if (!claimHash) {
+        return;
+      }
+      notifyTxSubmitted("Linea claim", claimHash, undefined, LINEA_CHAIN_ID);
+      await waitForReviewedStatusReceipt({
+        hash: claimHash,
+        label: "Linea claim",
+        step: "status.cctp.claim",
+        chainId: LINEA_CHAIN_ID,
       });
-      notifyTxSubmitted("Linea mint", mintHash);
-      await publicClient.waitForTransactionReceipt({ hash: mintHash });
-      notifyTxConfirmed("Linea mint", mintHash);
 
       setCctpBridgeRecords((current) =>
         current.map((record) =>
@@ -3456,11 +3877,11 @@ export function DepositSwap() {
       );
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Linea mint failed";
+        error instanceof Error ? error.message : "Linea claim failed";
       setTxError(message);
       pushAlert({
         type: "error",
-        title: "Linea mint failed",
+        title: "Linea claim failed",
         message,
       });
     } finally {
@@ -3502,8 +3923,9 @@ export function DepositSwap() {
     if (!progress) {
       if (
         !isCustomLineaRecipientValid ||
-        statusPredepositAmount == null ||
-        statusPredepositAmount <= ZERO_AMOUNT
+        (!statusTxReviewHasSkip("predeposit") &&
+          (statusPredepositAmount == null ||
+            statusPredepositAmount <= ZERO_AMOUNT))
       ) {
         return;
       }
@@ -3604,6 +4026,19 @@ export function DepositSwap() {
           : null;
 
       if (!progress) {
+        if (
+          statusTxReviewHasSkip("predeposit") &&
+          (statusPredepositAmount == null ||
+            statusPredepositAmount <= ZERO_AMOUNT)
+        ) {
+          logStatusTxReviewEvent(statusTxReviewConfig, {
+            step: "status.predeposit",
+            phase: "skipped",
+            reason: "gmSkip=predeposit",
+            state: { parsedAmount },
+          });
+        }
+
         const unitBalanceBefore = await statusClient.readContract({
           abi: erc20Abi,
           address: exitGenericUnitTokenAddress,
@@ -3611,33 +4046,53 @@ export function DepositSwap() {
           args: [accountAddress],
         });
 
+        const withdrawArgs = [
+          statusPredepositChainNickname,
+          predepositRecipient,
+          accountAddress,
+          ZERO_ADDRESS,
+        ] as const;
         setTxStep("submitting");
         console.info("Status predeposit withdrawal call", {
           functionName: "withdrawPredeposit",
           address: BRIDGE_COORDINATOR_L1_ADDRESS,
           chainId: MAINNET_CHAIN_ID,
-          args: [
-            statusPredepositChainNickname,
-            predepositRecipient,
-            accountAddress,
-            ZERO_ADDRESS,
-          ],
+          args: withdrawArgs,
         });
-        const withdrawHash = await writeContractAsync({
-          abi: bridgeCoordinatorPredepositAbi,
+        const withdrawRequest = {
           address: BRIDGE_COORDINATOR_L1_ADDRESS,
           chainId: MAINNET_CHAIN_ID,
           functionName: "withdrawPredeposit",
-          args: [
-            statusPredepositChainNickname,
-            predepositRecipient,
-            accountAddress,
-            ZERO_ADDRESS,
-          ],
+          args: withdrawArgs,
+        } as const satisfies StatusTxReviewRequest;
+        const withdrawHash = await submitReviewedStatusWrite(
+          "status.withdrawPredeposit",
+          withdrawRequest,
+          () =>
+            writeContractAsync({
+              abi: bridgeCoordinatorPredepositAbi,
+              address: BRIDGE_COORDINATOR_L1_ADDRESS,
+              chainId: MAINNET_CHAIN_ID,
+              functionName: "withdrawPredeposit",
+              args: withdrawArgs,
+            }),
+          { predepositAmount: statusPredepositAmount },
+        );
+        if (!withdrawHash) {
+          return;
+        }
+        notifyTxSubmitted(
+          "Status withdrawal",
+          withdrawHash,
+          undefined,
+          MAINNET_CHAIN_ID,
+        );
+        await waitForReviewedStatusReceipt({
+          hash: withdrawHash,
+          label: "Status withdrawal",
+          step: "status.withdrawPredeposit",
+          chainId: MAINNET_CHAIN_ID,
         });
-        notifyTxSubmitted("Status withdrawal", withdrawHash);
-        await publicClient.waitForTransactionReceipt({ hash: withdrawHash });
-        notifyTxConfirmed("Status withdrawal", withdrawHash);
 
         const unitBalanceAfter = await statusClient.readContract({
           abi: erc20Abi,
@@ -3646,6 +4101,18 @@ export function DepositSwap() {
           args: [accountAddress],
         });
         redeemShares = unitBalanceAfter - unitBalanceBefore;
+        if (redeemShares <= ZERO_AMOUNT && statusTxReviewHasSkip("balance")) {
+          redeemShares =
+            statusPredepositAmount && statusPredepositAmount > ZERO_AMOUNT
+              ? statusPredepositAmount
+              : (parsedAmount ?? ZERO_AMOUNT);
+          logStatusTxReviewEvent(statusTxReviewConfig, {
+            step: "status.withdrawPredeposit.balance",
+            phase: "skipped",
+            reason: "gmSkip=balance",
+            state: { redeemShares },
+          });
+        }
 
         if (redeemShares <= ZERO_AMOUNT) {
           setTxError("No GenericUnit tokens were withdrawn.");
@@ -3671,45 +4138,110 @@ export function DepositSwap() {
           return;
         }
 
-        const hasLiquidityBeforeApproval = await ensureRedeemVaultLiquidity({
-          redeemShares,
-        });
+        const hasLiquidityBeforeApproval = statusTxReviewHasSkip("liquidity")
+          ? true
+          : await ensureRedeemVaultLiquidity({
+              redeemShares,
+            });
+
+        if (statusTxReviewHasSkip("liquidity")) {
+          logStatusTxReviewEvent(statusTxReviewConfig, {
+            step: "status.redeem.liquidityBeforeApproval",
+            phase: "skipped",
+            reason: "gmSkip=liquidity",
+            state: { redeemShares },
+          });
+        }
 
         if (!hasLiquidityBeforeApproval) {
           return;
         }
 
-        const currentAllowance = await statusClient.readContract({
-          abi: erc20Abi,
-          address: exitGenericUnitTokenAddress,
-          functionName: "allowance",
-          args: [accountAddress, exitVaultAddress],
-        });
+        const redeemApprovalDryReviewed =
+          statusTxReviewHasSkip("send") &&
+          statusTxReviewDrySubmittedStepsRef.current.has(
+            "status.redeem.approve",
+          );
+        const currentAllowance =
+          statusTxReviewHasSkip("allowance") || redeemApprovalDryReviewed
+            ? redeemShares
+            : await statusClient.readContract({
+                abi: erc20Abi,
+                address: exitGenericUnitTokenAddress,
+                functionName: "allowance",
+                args: [accountAddress, exitVaultAddress],
+              });
+
+        if (statusTxReviewHasSkip("allowance") || redeemApprovalDryReviewed) {
+          logStatusTxReviewEvent(statusTxReviewConfig, {
+            step: "status.redeem.allowance",
+            phase: "skipped",
+            reason: statusTxReviewHasSkip("allowance")
+              ? "gmSkip=allowance"
+              : "gmSkip=send reviewed status.redeem.approve",
+            state: { currentAllowance, redeemShares },
+          });
+        }
 
         if (currentAllowance < redeemShares) {
+          const approvalArgs = [exitVaultAddress, redeemShares] as const;
           setTxStep("approving");
           console.info("Status redeem approval call", {
             functionName: "approve",
             address: exitGenericUnitTokenAddress,
             chainId: MAINNET_CHAIN_ID,
-            args: [exitVaultAddress, redeemShares],
+            args: approvalArgs,
           });
-          const approvalHash = await writeContractAsync({
-            abi: erc20Abi,
+          const approvalRequest = {
             address: exitGenericUnitTokenAddress,
             chainId: MAINNET_CHAIN_ID,
             functionName: "approve",
-            args: [exitVaultAddress, redeemShares],
+            args: approvalArgs,
+          } as const satisfies StatusTxReviewRequest;
+          const approvalHash = await submitReviewedStatusWrite(
+            "status.redeem.approve",
+            approvalRequest,
+            () =>
+              writeContractAsync({
+                abi: erc20Abi,
+                address: exitGenericUnitTokenAddress,
+                chainId: MAINNET_CHAIN_ID,
+                functionName: "approve",
+                args: approvalArgs,
+              }),
+          );
+          if (!approvalHash) {
+            return;
+          }
+          notifyTxSubmitted(
+            "Approval",
+            approvalHash,
+            undefined,
+            MAINNET_CHAIN_ID,
+          );
+          await waitForReviewedStatusReceipt({
+            hash: approvalHash,
+            label: "Approval",
+            step: "status.redeem.approve",
+            chainId: MAINNET_CHAIN_ID,
           });
-          notifyTxSubmitted("Approval", approvalHash);
-          await publicClient.waitForTransactionReceipt({ hash: approvalHash });
-          notifyTxConfirmed("Approval", approvalHash);
           await refetchRedeemAllowance?.();
         }
 
-        const hasLiquidityBeforeRedeem = await ensureRedeemVaultLiquidity({
-          redeemShares,
-        });
+        const hasLiquidityBeforeRedeem = statusTxReviewHasSkip("liquidity")
+          ? true
+          : await ensureRedeemVaultLiquidity({
+              redeemShares,
+            });
+
+        if (statusTxReviewHasSkip("liquidity")) {
+          logStatusTxReviewEvent(statusTxReviewConfig, {
+            step: "status.redeem.liquidityBeforeRedeem",
+            phase: "skipped",
+            reason: "gmSkip=liquidity",
+            state: { redeemShares },
+          });
+        }
 
         if (!hasLiquidityBeforeRedeem) {
           return;
@@ -3722,23 +4254,46 @@ export function DepositSwap() {
           args: [accountAddress],
         });
 
+        const redeemArgs = [
+          redeemShares,
+          accountAddress,
+          accountAddress,
+        ] as const;
         setTxStep("submitting");
         console.info("Status redeem call", {
           functionName: "redeem",
           address: exitVaultAddress,
           chainId: MAINNET_CHAIN_ID,
-          args: [redeemShares, accountAddress, accountAddress],
+          args: redeemArgs,
         });
-        const redeemHash = await writeContractAsync({
-          abi: erc4626Abi,
+        const redeemRequest = {
           address: exitVaultAddress,
           chainId: MAINNET_CHAIN_ID,
           functionName: "redeem",
-          args: [redeemShares, accountAddress, accountAddress],
+          args: redeemArgs,
+        } as const satisfies StatusTxReviewRequest;
+        const redeemHash = await submitReviewedStatusWrite(
+          "status.redeem",
+          redeemRequest,
+          () =>
+            writeContractAsync({
+              abi: erc4626Abi,
+              address: exitVaultAddress,
+              chainId: MAINNET_CHAIN_ID,
+              functionName: "redeem",
+              args: redeemArgs,
+            }),
+        );
+        if (!redeemHash) {
+          return;
+        }
+        notifyTxSubmitted("Redeem", redeemHash, undefined, MAINNET_CHAIN_ID);
+        await waitForReviewedStatusReceipt({
+          hash: redeemHash,
+          label: "Redeem",
+          step: "status.redeem",
+          chainId: MAINNET_CHAIN_ID,
         });
-        notifyTxSubmitted("Redeem", redeemHash);
-        await publicClient.waitForTransactionReceipt({ hash: redeemHash });
-        notifyTxConfirmed("Redeem", redeemHash);
 
         const stablecoinBalanceAfter = await statusClient.readContract({
           abi: erc20Abi,
@@ -3747,6 +4302,15 @@ export function DepositSwap() {
           args: [accountAddress],
         });
         redeemedAmount = stablecoinBalanceAfter - stablecoinBalanceBefore;
+        if (redeemedAmount <= ZERO_AMOUNT && statusTxReviewHasSkip("balance")) {
+          redeemedAmount = previewToAmountRaw ?? redeemShares;
+          logStatusTxReviewEvent(statusTxReviewConfig, {
+            step: "status.redeem.balance",
+            phase: "skipped",
+            reason: "gmSkip=balance",
+            state: { redeemedAmount },
+          });
+        }
 
         if (redeemedAmount <= ZERO_AMOUNT) {
           setTxError(`No ${exitTicker} was redeemed.`);
@@ -3783,12 +4347,23 @@ export function DepositSwap() {
         return;
       }
 
-      const bridgeBalance = await statusClient.readContract({
-        abi: erc20Abi,
-        address: exitStablecoinAddress,
-        functionName: "balanceOf",
-        args: [accountAddress],
-      });
+      const bridgeBalance = statusTxReviewHasSkip("balance")
+        ? redeemedAmount
+        : await statusClient.readContract({
+            abi: erc20Abi,
+            address: exitStablecoinAddress,
+            functionName: "balanceOf",
+            args: [accountAddress],
+          });
+
+      if (statusTxReviewHasSkip("balance")) {
+        logStatusTxReviewEvent(statusTxReviewConfig, {
+          step: "status.bridge.balance",
+          phase: "skipped",
+          reason: "gmSkip=balance",
+          state: { bridgeBalance, redeemedAmount },
+        });
+      }
 
       if (bridgeBalance < redeemedAmount) {
         setTxError(`Insufficient ${exitTicker} balance to continue bridge.`);
@@ -3801,74 +4376,134 @@ export function DepositSwap() {
       }
 
       if (exitTicker === "USDC") {
-        const bridgeAllowance = await statusClient.readContract({
-          abi: erc20Abi,
-          address: exitStablecoinAddress,
-          functionName: "allowance",
-          args: [accountAddress, CCTP_TOKEN_MESSENGER_V2_ADDRESS],
-        });
+        const bridgeApprovalDryReviewed =
+          statusTxReviewHasSkip("send") &&
+          statusTxReviewDrySubmittedStepsRef.current.has("status.cctp.approve");
+        const bridgeAllowance =
+          statusTxReviewHasSkip("allowance") || bridgeApprovalDryReviewed
+            ? redeemedAmount
+            : await statusClient.readContract({
+                abi: erc20Abi,
+                address: exitStablecoinAddress,
+                functionName: "allowance",
+                args: [accountAddress, CCTP_TOKEN_MESSENGER_V2_ADDRESS],
+              });
+
+        if (statusTxReviewHasSkip("allowance") || bridgeApprovalDryReviewed) {
+          logStatusTxReviewEvent(statusTxReviewConfig, {
+            step: "status.cctp.allowance",
+            phase: "skipped",
+            reason: statusTxReviewHasSkip("allowance")
+              ? "gmSkip=allowance"
+              : "gmSkip=send reviewed status.cctp.approve",
+            state: { bridgeAllowance, redeemedAmount },
+          });
+        }
 
         if (bridgeAllowance < redeemedAmount) {
+          const bridgeApprovalArgs = [
+            CCTP_TOKEN_MESSENGER_V2_ADDRESS,
+            redeemedAmount,
+          ] as const;
           setTxStep("approving");
           console.info("CCTP USDC approval call", {
             functionName: "approve",
             address: exitStablecoinAddress,
             chainId: MAINNET_CHAIN_ID,
-            args: [CCTP_TOKEN_MESSENGER_V2_ADDRESS, redeemedAmount],
+            args: bridgeApprovalArgs,
           });
-          const approvalHash = await writeContractAsync({
-            abi: erc20Abi,
+          const bridgeApprovalRequest = {
             address: exitStablecoinAddress,
             chainId: MAINNET_CHAIN_ID,
             functionName: "approve",
-            args: [CCTP_TOKEN_MESSENGER_V2_ADDRESS, redeemedAmount],
+            args: bridgeApprovalArgs,
+          } as const satisfies StatusTxReviewRequest;
+          const approvalHash = await submitReviewedStatusWrite(
+            "status.cctp.approve",
+            bridgeApprovalRequest,
+            () =>
+              writeContractAsync({
+                abi: erc20Abi,
+                address: exitStablecoinAddress,
+                chainId: MAINNET_CHAIN_ID,
+                functionName: "approve",
+                args: bridgeApprovalArgs,
+              }),
+          );
+          if (!approvalHash) {
+            return;
+          }
+          notifyTxSubmitted(
+            "Bridge approval",
+            approvalHash,
+            undefined,
+            MAINNET_CHAIN_ID,
+          );
+          await waitForReviewedStatusReceipt({
+            hash: approvalHash,
+            label: "Bridge approval",
+            step: "status.cctp.approve",
+            chainId: MAINNET_CHAIN_ID,
           });
-          notifyTxSubmitted("Bridge approval", approvalHash);
-          await publicClient.waitForTransactionReceipt({ hash: approvalHash });
-          notifyTxConfirmed("Bridge approval", approvalHash);
         }
 
         const cctpMaxFee = ZERO_AMOUNT;
-        const mintRecipient = toBytes32(recipient);
+        const bridgeRecipientBytes = toBytes32(recipient);
+        const bridgeArgs = [
+          redeemedAmount,
+          CCTP_LINEA_DOMAIN,
+          bridgeRecipientBytes,
+          exitStablecoinAddress,
+          ZERO_BYTES32,
+          cctpMaxFee,
+          CCTP_STANDARD_FINALITY_THRESHOLD,
+        ] as const;
 
         setTxStep("submitting");
-        console.info("CCTP depositForBurn call", {
+        console.info("CCTP bridge call", {
           functionName: "depositForBurn",
           address: CCTP_TOKEN_MESSENGER_V2_ADDRESS,
           chainId: MAINNET_CHAIN_ID,
-          args: [
-            redeemedAmount,
-            CCTP_LINEA_DOMAIN,
-            mintRecipient,
-            exitStablecoinAddress,
-            ZERO_BYTES32,
-            cctpMaxFee,
-            CCTP_STANDARD_FINALITY_THRESHOLD,
-          ],
+          args: bridgeArgs,
         });
-        const burnHash = await writeContractAsync({
-          abi: cctpTokenMessengerV2Abi,
+        const bridgeRequest = {
           address: CCTP_TOKEN_MESSENGER_V2_ADDRESS,
           chainId: MAINNET_CHAIN_ID,
           functionName: "depositForBurn",
-          args: [
-            redeemedAmount,
-            CCTP_LINEA_DOMAIN,
-            mintRecipient,
-            exitStablecoinAddress,
-            ZERO_BYTES32,
-            cctpMaxFee,
-            CCTP_STANDARD_FINALITY_THRESHOLD,
-          ],
+          args: bridgeArgs,
+        } as const satisfies StatusTxReviewRequest;
+        const bridgeHash = await submitReviewedStatusWrite(
+          "status.cctp.bridge",
+          bridgeRequest,
+          () =>
+            writeContractAsync({
+              abi: cctpTokenMessengerV2Abi,
+              address: CCTP_TOKEN_MESSENGER_V2_ADDRESS,
+              chainId: MAINNET_CHAIN_ID,
+              functionName: "depositForBurn",
+              args: bridgeArgs,
+            }),
+        );
+        if (!bridgeHash) {
+          return;
+        }
+        notifyTxSubmitted(
+          "USDC bridge",
+          bridgeHash,
+          undefined,
+          MAINNET_CHAIN_ID,
+        );
+        await waitForReviewedStatusReceipt({
+          hash: bridgeHash,
+          label: "USDC bridge",
+          step: "status.cctp.bridge",
+          chainId: MAINNET_CHAIN_ID,
         });
-        notifyTxSubmitted("USDC burn", burnHash);
-        await publicClient.waitForTransactionReceipt({ hash: burnHash });
-        notifyTxConfirmed("USDC burn", burnHash);
 
         const now = Date.now();
         setCctpBridgeRecords((current) =>
           upsertCctpBridgeRecord(current, {
-            txHash: burnHash,
+            txHash: bridgeHash,
             account: accountAddress,
             amount: redeemedAmount.toString(),
             recipient,
@@ -3988,74 +4623,84 @@ export function DepositSwap() {
       return;
     }
 
-    if (isPredepositRedeem && pendingCctpRecord) {
-      await handleMintCctpOnLinea();
+    if (primaryActionInFlightRef.current) {
       return;
     }
 
-    if (isDepositFlow && isCitreaDeposit && isAutoStakeFlowInProgress) {
-      return;
-    }
+    primaryActionInFlightRef.current = true;
 
-    if (isCitreaReturnFlow && isOnMainnet && !citreaReturnReadyForRedeem) {
-      if (!citreaReturnPending && !citreaReturnFinal && switchChainAsync) {
-        await switchChainAsync({ chainId: CITREA_CHAIN_ID_NUMBER });
+    try {
+      if (isPredepositRedeem && pendingCctpRecord) {
+        await handleClaimCctpOnLinea();
+        return;
       }
-      return;
-    }
 
-    if (shouldSwitchChain) {
-      if (switchChainAsync) {
-        await switchChainAsync({ chainId: requiredChainId });
+      if (isDepositFlow && isCitreaDeposit && isAutoStakeFlowInProgress) {
+        return;
       }
-      return;
-    }
 
-    if (insufficientBalance) {
-      return;
-    }
-
-    if (
-      !isDepositFlow &&
-      shouldUseVaultPreview &&
-      (isRedeemQuotePending || isRedeemQuoteUnavailable)
-    ) {
-      return;
-    }
-
-    if (
-      !isDepositFlow &&
-      shouldGuardRedeemLiquidity &&
-      (redeemLiquidityState.phase === "loading" ||
-        redeemLiquidityState.phase === "insufficient" ||
-        redeemLiquidityState.phase === "unavailable")
-    ) {
-      return;
-    }
-
-    if (isDepositFlow) {
-      await handleDeposit();
-      return;
-    }
-
-    if (isPredepositRedeem) {
-      await handleStatusExit();
-      return;
-    }
-
-    if (isCitreaReturnFlow) {
-      if (isOnMainnet) {
-        if (!citreaReturnReadyForRedeem) {
-          return;
+      if (isCitreaReturnFlow && isOnMainnet && !citreaReturnReadyForRedeem) {
+        if (!citreaReturnPending && !citreaReturnFinal && switchChainAsync) {
+          await switchChainAsync({ chainId: CITREA_CHAIN_ID_NUMBER });
         }
-        await handleRedeem();
-      } else {
-        await handleCitreaReturn();
+        return;
       }
-      return;
-    }
 
-    await handleRedeem();
+      if (shouldSwitchChain) {
+        if (switchChainAsync) {
+          await switchChainAsync({ chainId: requiredChainId });
+        }
+        return;
+      }
+
+      if (insufficientBalance && !statusTxReviewHasSkip("balance")) {
+        return;
+      }
+
+      if (
+        !isDepositFlow &&
+        shouldUseVaultPreview &&
+        (isRedeemQuotePending || isRedeemQuoteUnavailable)
+      ) {
+        return;
+      }
+
+      if (
+        !isDepositFlow &&
+        shouldGuardRedeemLiquidity &&
+        (redeemLiquidityState.phase === "loading" ||
+          redeemLiquidityState.phase === "insufficient" ||
+          redeemLiquidityState.phase === "unavailable")
+      ) {
+        return;
+      }
+
+      if (isDepositFlow) {
+        await handleDeposit();
+        return;
+      }
+
+      if (isPredepositRedeem) {
+        await handleStatusExit();
+        return;
+      }
+
+      if (isCitreaReturnFlow) {
+        if (isOnMainnet) {
+          if (!citreaReturnReadyForRedeem) {
+            return;
+          }
+          await handleRedeem();
+        } else {
+          await handleCitreaReturn();
+        }
+        return;
+      }
+
+      await handleRedeem();
+    } finally {
+      primaryActionInFlightRef.current = false;
+    }
   };
 
   const handleStakeAction = async () => {
@@ -4423,7 +5068,7 @@ export function DepositSwap() {
                       {!useCustomLineaRecipient ? (
                         <span className="mt-1 block">
                           If this wallet is a multisig or contract, confirm it
-                          exists and is controllable on Linea, or set a
+                          exists and you have control over it on Linea, or set a
                           different recipient.
                         </span>
                       ) : null}
@@ -4541,16 +5186,16 @@ export function DepositSwap() {
               {isPredepositRedeem && pendingCctpRecord ? (
                 <p className="text-center text-xs text-muted-foreground">
                   {pendingCctpRecord.status === "submitted"
-                    ? "USDC burn confirmed. Waiting for Circle attestation."
+                    ? "USDC bridge submitted. Waiting for Circle attestation."
                     : activeChainId === LINEA_CHAIN_ID
-                      ? "Attestation ready. Mint USDC on Linea to finish."
-                      : "Attestation ready. Switch to Linea to mint USDC."}
+                      ? "Attestation ready. Claim USDC on Linea to finish."
+                      : "Attestation ready. Switch to Linea to claim USDC."}
                 </p>
               ) : null}
               {isPredepositRedeem && statusExitProgress ? (
                 <div className="rounded-xl border border-border/60 bg-background/70 p-3 text-center text-xs text-muted-foreground">
                   {statusExitProgress.stage === "gunit"
-                    ? `Status withdrawal confirmed. Continue redeeming the stored GUnits into ${statusExitProgress.ticker}.`
+                    ? "Predeposit withdrawal confirmed. Continue by redeeming GUSD for your collateral."
                     : `Status collateral redeemed. Continue bridging the stored ${statusExitProgress.ticker} amount to Linea.`}
                 </div>
               ) : null}
@@ -4593,12 +5238,6 @@ export function DepositSwap() {
                     : `Bridge ${citreaReturnStatusLabel
                         .replace(/^./, (char) => char.toUpperCase())
                         .trim()}.`}
-                </p>
-              ) : null}
-              {!txError && insufficientBalance ? (
-                <p className="text-center text-xs text-destructive">
-                  Amount exceeds available balance. Click your balance to use
-                  the max.
                 </p>
               ) : null}
               {txError ? (

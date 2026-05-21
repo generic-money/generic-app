@@ -213,6 +213,7 @@ const setOpportunityRoute = (
 beforeEach(() => {
   vi.clearAllMocks();
   window.history.pushState({}, "", "/");
+  window.localStorage.clear();
   delete window.gmTxReview;
   lineaNativeBridgeMocks.loadLineaNativeBridgeRecords.mockReturnValue([]);
   lineaNativeBridgeMocks.pruneLineaNativeBridgeRecords.mockImplementation(
@@ -747,6 +748,26 @@ test("logs Status tx review writes in transaction order", async () => {
         2000,
       ],
     }),
+  ]);
+  expect(
+    waitForTransactionReceipt.mock.calls.map(([request]) => request),
+  ).toEqual([
+    {
+      hash: "0x0000000000000000000000000000000000000000000000000000000000000001",
+      confirmations: 2,
+    },
+    {
+      hash: "0x0000000000000000000000000000000000000000000000000000000000000002",
+      confirmations: 2,
+    },
+    {
+      hash: "0x0000000000000000000000000000000000000000000000000000000000000003",
+      confirmations: 2,
+    },
+    {
+      hash: "0x0000000000000000000000000000000000000000000000000000000000000004",
+      confirmations: 2,
+    },
   ]);
   expect(
     consoleInfo.mock.calls

@@ -260,6 +260,7 @@ const ENABLE_LZ_LOGS = process.env.NODE_ENV !== "production";
 const LZ_STATUS_POLL_INTERVAL_MS = 15_000;
 const CCTP_STATUS_POLL_INTERVAL_MS = 15_000;
 const AUTO_STAKE_WAIT_TIMEOUT_MS = 15 * 60 * 1000;
+const FOLLOW_UP_TX_CONFIRMATIONS = 2;
 const BRIDGE_COORDINATOR_L2_ADDRESS =
   "0x6E810122C2B7d474Ef568bdf221ec05f2dC8063A" as const satisfies HexAddress;
 const BRIDGE_COORDINATOR_L1_ADDRESS = getBridgeCoordinatorAddress(
@@ -460,6 +461,17 @@ const readLineaTokenBridgeFee = async (client: PublicClient) => {
     return ZERO_AMOUNT;
   }
 };
+
+// Wallet RPC simulation can lag the public RPC used for receipts; wait one
+// extra block before follow-up reads, prompts, or transactions.
+const waitForFollowUpTransactionReceipt = (
+  client: PublicClient | null | undefined,
+  hash: HexBytes,
+) =>
+  client?.waitForTransactionReceipt({
+    hash,
+    confirmations: FOLLOW_UP_TX_CONFIRMATIONS,
+  });
 
 const buildLayerZeroMessage = (hash: HexBytes) => (
   <span className="inline-flex flex-wrap items-center gap-1.5">
@@ -3012,7 +3024,7 @@ export function DepositSwap() {
         return false;
       }
 
-      await publicClient?.waitForTransactionReceipt({ hash });
+      await waitForFollowUpTransactionReceipt(publicClient, hash);
       notifyTxConfirmed(label, hash, undefined, chainId);
       logStatusTxReviewEvent(statusTxReviewConfig, {
         step,
@@ -3112,7 +3124,7 @@ export function DepositSwap() {
           args: [depositorAddress, parsedAmount],
         });
         notifyTxSubmitted("Approval", approvalHash);
-        await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+        await waitForFollowUpTransactionReceipt(publicClient, approvalHash);
         notifyTxConfirmed("Approval", approvalHash);
         await refetchDepositAllowance?.();
       }
@@ -3285,7 +3297,7 @@ export function DepositSwap() {
         });
       }
       notifyTxSubmitted(depositActionLabel, depositHash, toastMessage);
-      await publicClient.waitForTransactionReceipt({ hash: depositHash });
+      await waitForFollowUpTransactionReceipt(publicClient, depositHash);
       notifyTxConfirmed(depositActionLabel, depositHash, toastMessage);
       if (isCitreaDeposit && stakeAfterBridge) {
         // TODO: replace balance polling with LayerZero message status tracking.
@@ -3373,7 +3385,7 @@ export function DepositSwap() {
           args: [BRIDGE_COORDINATOR_L2_ADDRESS, parsedAmount],
         });
         notifyTxSubmitted("Approval", approvalHash);
-        await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+        await waitForFollowUpTransactionReceipt(publicClient, approvalHash);
         notifyTxConfirmed("Approval", approvalHash);
         await refetchCitreaAllowance?.();
       }
@@ -3455,7 +3467,7 @@ export function DepositSwap() {
       );
       const toastMessage = buildLayerZeroMessage(bridgeHash);
       notifyTxSubmitted("Bridge", bridgeHash, toastMessage);
-      await publicClient.waitForTransactionReceipt({ hash: bridgeHash });
+      await waitForFollowUpTransactionReceipt(publicClient, bridgeHash);
       notifyTxConfirmed("Bridge", bridgeHash, toastMessage);
 
       setFromAmount("");
@@ -3517,7 +3529,7 @@ export function DepositSwap() {
             args: [CITREA_VAULT_ADDRESS, targetAmount],
           });
           notifyTxSubmitted("Stake approval", approvalHash);
-          await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+          await waitForFollowUpTransactionReceipt(publicClient, approvalHash);
           notifyTxConfirmed("Stake approval", approvalHash);
           await refetchStakeAllowance?.();
         }
@@ -3536,7 +3548,7 @@ export function DepositSwap() {
           args: [targetAmount, accountAddress],
         });
         notifyTxSubmitted("Stake", stakeHash);
-        await publicClient.waitForTransactionReceipt({ hash: stakeHash });
+        await waitForFollowUpTransactionReceipt(publicClient, stakeHash);
         notifyTxConfirmed("Stake", stakeHash);
 
         setBridgeStakeState("idle");
@@ -3678,7 +3690,7 @@ export function DepositSwap() {
           args: [accountAddress, accountAddress, parsedAmount],
         });
         notifyTxSubmitted("Unwrap", unwrapHash);
-        await publicClient.waitForTransactionReceipt({ hash: unwrapHash });
+        await waitForFollowUpTransactionReceipt(publicClient, unwrapHash);
         notifyTxConfirmed("Unwrap", unwrapHash);
 
         const balanceAfter = await publicClient.readContract({
@@ -3746,7 +3758,7 @@ export function DepositSwap() {
           args: [vaultAddress, redeemShares],
         });
         notifyTxSubmitted("Approval", approvalHash);
-        await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+        await waitForFollowUpTransactionReceipt(publicClient, approvalHash);
         notifyTxConfirmed("Approval", approvalHash);
         await refetchRedeemAllowance?.();
       }
@@ -3775,7 +3787,7 @@ export function DepositSwap() {
         args: [redeemShares, accountAddress, accountAddress],
       });
       notifyTxSubmitted("Redeem", redeemHash);
-      await publicClient.waitForTransactionReceipt({ hash: redeemHash });
+      await waitForFollowUpTransactionReceipt(publicClient, redeemHash);
       notifyTxConfirmed("Redeem", redeemHash);
 
       setFromAmount("");
@@ -4534,7 +4546,7 @@ export function DepositSwap() {
               args: [LINEA_TOKEN_BRIDGE_ADDRESS, ZERO_AMOUNT],
             });
             notifyTxSubmitted("Bridge approval reset", resetHash);
-            await publicClient.waitForTransactionReceipt({ hash: resetHash });
+            await waitForFollowUpTransactionReceipt(publicClient, resetHash);
             notifyTxConfirmed("Bridge approval reset", resetHash);
           }
 
@@ -4552,7 +4564,7 @@ export function DepositSwap() {
             args: [LINEA_TOKEN_BRIDGE_ADDRESS, redeemedAmount],
           });
           notifyTxSubmitted("Bridge approval", approvalHash);
-          await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+          await waitForFollowUpTransactionReceipt(publicClient, approvalHash);
           notifyTxConfirmed("Bridge approval", approvalHash);
         }
 
@@ -4574,7 +4586,7 @@ export function DepositSwap() {
           value: bridgeFee,
         });
         notifyTxSubmitted("Linea bridge", bridgeHash);
-        await publicClient.waitForTransactionReceipt({ hash: bridgeHash });
+        await waitForFollowUpTransactionReceipt(publicClient, bridgeHash);
         const now = Date.now();
         setLineaNativeBridgeRecords((current) =>
           upsertLineaNativeBridgeRecord(current, {
@@ -4772,7 +4784,7 @@ export function DepositSwap() {
         args: [unstakeParsedAmount, accountAddress, accountAddress],
       });
       notifyTxSubmitted("Unstake", redeemHash);
-      await publicClient.waitForTransactionReceipt({ hash: redeemHash });
+      await waitForFollowUpTransactionReceipt(publicClient, redeemHash);
       notifyTxConfirmed("Unstake", redeemHash);
 
       setUnstakeAmount("");

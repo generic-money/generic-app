@@ -210,6 +210,21 @@ const setOpportunityRoute = (
   });
 };
 
+const confirmLineaRecipient = async (
+  user: ReturnType<typeof userEvent.setup>,
+) => {
+  await waitFor(() =>
+    expect(
+      screen.getByRole("textbox", { name: /recipient on linea mainnet/i }),
+    ).toHaveDisplayValue(ACCOUNT),
+  );
+  await user.click(
+    screen.getByRole("checkbox", {
+      name: /i control this recipient on linea mainnet/i,
+    }),
+  );
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   window.history.pushState({}, "", "/");
@@ -273,7 +288,7 @@ test("defaults Status to withdraw-only while deposits are paused", () => {
     screen.getByRole("button", { name: /connect wallet/i }),
   ).toBeDisabled();
   expect(screen.queryByText(/status claim/i)).not.toBeInTheDocument();
-  expect(screen.getByText(/claim on linea/i)).toBeInTheDocument();
+  expect(screen.getByText(/bridge to linea mainnet/i)).toBeInTheDocument();
   expect(
     screen.queryByText(/required after redeeming/i),
   ).not.toBeInTheDocument();
@@ -301,7 +316,7 @@ test("keeps the Citrea deposit CTA unaffected", () => {
   expect(screen.queryByText(PAUSED_MESSAGE)).not.toBeInTheDocument();
 });
 
-test("enables Status withdrawals without exposing USDS", () => {
+test("requires recipient confirmation before enabling Status withdrawals", async () => {
   setOpportunityRoute("predeposit", "redeem");
   wagmiMocks.useAccount.mockReturnValue({ address: ACCOUNT });
   wagmiMocks.useReadContract.mockImplementation(
@@ -335,13 +350,22 @@ test("enables Status withdrawals without exposing USDS", () => {
     refresh: vi.fn(),
   });
 
+  const user = userEvent.setup();
+
   render(<DepositSwap />);
 
+  expect(
+    await screen.findByRole("button", { name: /confirm linea recipient/i }),
+  ).toBeDisabled();
+  expect(
+    screen.getByRole("textbox", { name: /recipient on linea mainnet/i }),
+  ).toHaveDisplayValue(ACCOUNT);
+  await confirmLineaRecipient(user);
   expect(
     screen.getByRole("button", { name: /withdraw, redeem & bridge/i }),
   ).toBeEnabled();
   expect(screen.queryByText(/status claim/i)).not.toBeInTheDocument();
-  expect(screen.getByText(/claim on linea/i)).toBeInTheDocument();
+  expect(screen.getByText(/bridge to linea mainnet/i)).toBeInTheDocument();
   expect(
     screen.queryByText(/required after redeeming/i),
   ).not.toBeInTheDocument();
@@ -443,7 +467,8 @@ test("allows Status exits to continue from withdrawn GUnits", async () => {
       genericUnitTokenAddress: GENERIC_UNIT,
       stablecoinAddress: USDC,
       vaultAddress: USDC_VAULT,
-      bridgeRequested: false,
+      bridgeRequested: true,
+      bridgeRecipient: ACCOUNT,
       shares: "1000000",
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -491,7 +516,8 @@ test("allows Status exits to continue from redeemed collateral", async () => {
       genericUnitTokenAddress: GENERIC_UNIT,
       stablecoinAddress: USDC,
       vaultAddress: USDC_VAULT,
-      bridgeRequested: false,
+      bridgeRequested: true,
+      bridgeRecipient: ACCOUNT,
       collateralAmount: "1000000",
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -563,7 +589,7 @@ test("exposes URL-gated Status tx review helpers", async () => {
   consoleInfo.mockRestore();
 });
 
-test("lets review mode skip the predeposit availability check", () => {
+test("lets review mode skip the predeposit availability check", async () => {
   window.history.pushState(
     {},
     "",
@@ -602,8 +628,11 @@ test("lets review mode skip the predeposit availability check", () => {
     refresh: vi.fn(),
   });
 
+  const user = userEvent.setup();
+
   render(<DepositSwap />);
 
+  await confirmLineaRecipient(user);
   expect(
     screen.getByRole("button", { name: /withdraw, redeem & bridge/i }),
   ).toBeEnabled();
@@ -710,6 +739,7 @@ test("logs Status tx review writes in transaction order", async () => {
 
   render(<DepositSwap />);
 
+  await confirmLineaRecipient(user);
   await user.click(
     screen.getByRole("button", { name: /withdraw, redeem & bridge/i }),
   );
@@ -871,6 +901,7 @@ test("pauses after each dry-submitted Status tx review write", async () => {
 
   render(<DepositSwap />);
 
+  await confirmLineaRecipient(user);
   await clickPrimaryAction();
   await waitFor(() =>
     expect(drySubmitSteps()).toEqual(["status.withdrawPredeposit"]),
@@ -981,6 +1012,16 @@ test("guards the primary action against duplicate wallet prompts", async () => {
 
   render(<DepositSwap />);
 
+  await waitFor(() =>
+    expect(
+      screen.getByRole("textbox", { name: /recipient on linea mainnet/i }),
+    ).toHaveDisplayValue(ACCOUNT),
+  );
+  fireEvent.click(
+    screen.getByRole("checkbox", {
+      name: /i control this recipient on linea mainnet/i,
+    }),
+  );
   const button = screen.getByRole("button", {
     name: /withdraw, redeem & bridge/i,
   });

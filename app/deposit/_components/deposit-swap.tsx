@@ -593,7 +593,7 @@ const OPPORTUNITY_OPTIONS: OpportunityOption[] = [
     title: "Status withdrawals",
     description: "Withdraw predeposits into USDC or USDT",
     badge: "Withdrawals open",
-    note: "Linea optional",
+    note: "Linea Mainnet",
     formDescription: "Withdraw your Status predeposit into collateral",
     iconSrc: "/chains/status.png",
     iconAlt: "Status",
@@ -724,8 +724,10 @@ export function DepositSwap() {
     id: number;
     source: RedeemSource;
   } | null>(null);
-  const [useCustomLineaRecipient, setUseCustomLineaRecipient] = useState(false);
   const [lineaRecipientInput, setLineaRecipientInput] = useState("");
+  const [lineaRecipientTouched, setLineaRecipientTouched] = useState(false);
+  const [lineaRecipientConfirmed, setLineaRecipientConfirmed] = useState(false);
+  const previousLineaAccountRef = useRef<string | undefined>(undefined);
   const isPredepositRedeem = !isDepositFlow && depositRoute === "predeposit";
   const selectableStablecoins = useMemo(
     () =>
@@ -885,7 +887,7 @@ export function DepositSwap() {
     : isCitreaReturnFlow
       ? "Bridge Citrea GUSD back to mainnet, then redeem into your selected stablecoin."
       : isPredepositRedeem
-        ? "Withdraw your Status predeposit, redeem into collateral, and bridge it to Linea to claim your rewards."
+        ? "Withdraw your Status predeposit, redeem into collateral, and bridge it to Linea Mainnet."
         : isGunitRedeem
           ? "Redeem GUnits back into your selected stablecoin."
           : "Redeem GUSD back into your selected stablecoin.";
@@ -1237,9 +1239,45 @@ export function DepositSwap() {
       return;
     }
 
-    setUseCustomLineaRecipient(false);
     setLineaRecipientInput("");
+    setLineaRecipientTouched(false);
+    setLineaRecipientConfirmed(false);
+    previousLineaAccountRef.current = undefined;
   }, [isPredepositRedeem]);
+
+  useEffect(() => {
+    if (!isPredepositRedeem) {
+      return;
+    }
+
+    const storedRecipient = statusExitProgress?.bridgeRecipient;
+
+    if (storedRecipient) {
+      setLineaRecipientInput(storedRecipient);
+      setLineaRecipientTouched(false);
+      setLineaRecipientConfirmed(true);
+      previousLineaAccountRef.current = accountAddress;
+      return;
+    }
+
+    if (previousLineaAccountRef.current === accountAddress) {
+      if (!lineaRecipientTouched && accountAddress && !lineaRecipientInput) {
+        setLineaRecipientInput(accountAddress);
+      }
+      return;
+    }
+
+    setLineaRecipientInput(accountAddress ?? "");
+    setLineaRecipientTouched(false);
+    setLineaRecipientConfirmed(false);
+    previousLineaAccountRef.current = accountAddress;
+  }, [
+    accountAddress,
+    isPredepositRedeem,
+    lineaRecipientInput,
+    lineaRecipientTouched,
+    statusExitProgress?.bridgeRecipient,
+  ]);
 
   useEffect(() => {
     if (depositRoute !== "citrea") {
@@ -1817,13 +1855,15 @@ export function DepositSwap() {
         ? pendingCctpRecord.message && pendingCctpRecord.attestation
         : statusTxReviewHasSkip("attestation")),
   );
-  const customLineaRecipient = lineaRecipientInput.trim();
-  const isCustomLineaRecipientValid =
-    !useCustomLineaRecipient || isAddress(customLineaRecipient);
-  const lineaRecipient =
-    useCustomLineaRecipient && isAddress(customLineaRecipient)
-      ? (customLineaRecipient as HexAddress)
-      : accountAddress;
+  const trimmedLineaRecipient = lineaRecipientInput.trim();
+  const isLineaRecipientValid = isAddress(trimmedLineaRecipient);
+  const lineaRecipient = isLineaRecipientValid
+    ? (trimmedLineaRecipient as HexAddress)
+    : undefined;
+  const storedLineaRecipient = statusExitProgress?.bridgeRecipient;
+  const isLineaRecipientConfirmed =
+    Boolean(storedLineaRecipient) || lineaRecipientConfirmed;
+  const isLineaRecipientLocked = Boolean(storedLineaRecipient);
 
   useEffect(() => {
     if (!statusTxReviewConfig.active || typeof window === "undefined") {
@@ -2508,17 +2548,6 @@ export function DepositSwap() {
         return { label: "Preparing recovery…", disabled: true };
       }
 
-      if (
-        !statusExitProgress?.bridgeRecipient &&
-        !isCustomLineaRecipientValid
-      ) {
-        return { label: "Invalid Linea recipient", disabled: true };
-      }
-
-      if (!(statusExitProgress?.bridgeRecipient ?? lineaRecipient)) {
-        return { label: "Linea recipient unavailable", disabled: true };
-      }
-
       if (isStatusExitGunitResume) {
         if (
           statusExitProgressShares == null ||
@@ -2553,6 +2582,20 @@ export function DepositSwap() {
         }
 
         return { label: "No Status predeposit", disabled: true };
+      }
+
+      if (!storedLineaRecipient) {
+        if (!isLineaRecipientValid) {
+          return { label: "Invalid Linea recipient", disabled: true };
+        }
+
+        if (!isLineaRecipientConfirmed) {
+          return { label: "Confirm Linea recipient", disabled: true };
+        }
+      }
+
+      if (!(storedLineaRecipient ?? lineaRecipient)) {
+        return { label: "Linea recipient unavailable", disabled: true };
       }
     }
 
@@ -2669,7 +2712,8 @@ export function DepositSwap() {
     isDepositFlow,
     isAutoStakeFlowInProgress,
     isGunitRedeem,
-    isCustomLineaRecipientValid,
+    isLineaRecipientConfirmed,
+    isLineaRecipientValid,
     isOnMainnet,
     isNonMainnetDeposit,
     isPredepositRedeem,
@@ -2700,6 +2744,7 @@ export function DepositSwap() {
     statusExitProgressShares,
     statusPredepositAmount,
     statusTxReviewHasSkip,
+    storedLineaRecipient,
     switchChainAsync,
     txStep,
     vaultAddress,
@@ -3911,6 +3956,8 @@ export function DepositSwap() {
       progress?.stablecoinAddress ?? stablecoinAddress;
     const exitBridgeRequested = true;
     const recipient = progress?.bridgeRecipient ?? lineaRecipient;
+    const shouldRequireLineaRecipientConfirmation =
+      exitBridgeRequested && !progress?.bridgeRecipient;
     const progressCreatedAt = progress?.createdAt ?? Date.now();
 
     if (
@@ -3928,16 +3975,22 @@ export function DepositSwap() {
       return;
     }
 
+    if (
+      shouldRequireLineaRecipientConfirmation &&
+      (!isLineaRecipientValid || !isLineaRecipientConfirmed)
+    ) {
+      return;
+    }
+
     if (exitBridgeRequested && !recipient) {
       return;
     }
 
     if (!progress) {
       if (
-        !isCustomLineaRecipientValid ||
-        (!statusTxReviewHasSkip("predeposit") &&
-          (statusPredepositAmount == null ||
-            statusPredepositAmount <= ZERO_AMOUNT))
+        !statusTxReviewHasSkip("predeposit") &&
+        (statusPredepositAmount == null ||
+          statusPredepositAmount <= ZERO_AMOUNT)
       ) {
         return;
       }
@@ -5058,7 +5111,7 @@ export function DepositSwap() {
                 <div className="space-y-4 rounded-2xl border border-border/60 bg-background/70 p-4">
                   <div className="space-y-1">
                     <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-                      Claim on Linea
+                      Bridge to Linea Mainnet
                     </p>
                     <a
                       href={STATUS_LINEA_ANNOUNCEMENT_URL}
@@ -5070,49 +5123,58 @@ export function DepositSwap() {
                     </a>
                   </div>
                   <div className="space-y-3">
-                    <div className="rounded-xl border border-border/60 bg-background/70 p-3 text-xs text-muted-foreground">
-                      <span className="font-semibold text-foreground/80">
-                        Recipient:
-                      </span>{" "}
-                      {useCustomLineaRecipient
-                        ? "custom Linea address"
-                        : "same address on Linea"}
-                      {!useCustomLineaRecipient ? (
-                        <span className="mt-1 block">
-                          If this wallet is a multisig or contract, confirm it
-                          exists and you have control over it on Linea, or set a
-                          different recipient.
-                        </span>
-                      ) : null}
-                    </div>
-                    <label className="flex items-center gap-2 text-xs font-medium text-foreground">
+                    <label
+                      htmlFor="linea-recipient-address"
+                      className="block text-xs font-medium text-foreground"
+                    >
+                      Recipient on Linea Mainnet
+                    </label>
+                    <input
+                      id="linea-recipient-address"
+                      type="text"
+                      inputMode="text"
+                      placeholder="0x..."
+                      value={lineaRecipientInput}
+                      disabled={isLineaRecipientLocked}
+                      aria-describedby="linea-recipient-help"
+                      onChange={(event) => {
+                        setLineaRecipientInput(event.target.value);
+                        setLineaRecipientTouched(true);
+                        setLineaRecipientConfirmed(false);
+                      }}
+                      className={cn(
+                        "h-10 w-full rounded-xl border border-border/80 bg-muted/30 px-3 font-mono text-[11px] text-foreground outline-none transition placeholder:text-muted-foreground/60 focus:border-primary/60 focus:bg-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-70",
+                        lineaRecipientInput &&
+                          !isLineaRecipientValid &&
+                          "border-destructive/60 focus:border-destructive/70",
+                      )}
+                    />
+                    <p
+                      id="linea-recipient-help"
+                      className="text-xs leading-relaxed text-muted-foreground"
+                    >
+                      Funds will be bridged to this address on Linea Mainnet.
+                      Make sure you can access it there, especially if this
+                      wallet is a multisig or contract.
+                    </p>
+                    <label className="flex items-start gap-2 rounded-xl border border-border/60 bg-background/70 p-3 text-xs font-medium text-foreground">
                       <input
                         type="checkbox"
-                        checked={useCustomLineaRecipient}
-                        onChange={(event) =>
-                          setUseCustomLineaRecipient(event.target.checked)
+                        checked={isLineaRecipientConfirmed}
+                        disabled={
+                          isLineaRecipientLocked || !isLineaRecipientValid
                         }
-                        className="h-4 w-4 rounded border-border text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                        onChange={(event) =>
+                          setLineaRecipientConfirmed(event.target.checked)
+                        }
+                        className="mt-0.5 h-4 w-4 rounded border-border text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed"
                       />
-                      Set another Linea recipient
+                      <span>
+                        I control this recipient on Linea Mainnet and understand
+                        bridged funds will be sent there.
+                      </span>
                     </label>
-                    {useCustomLineaRecipient ? (
-                      <input
-                        type="text"
-                        inputMode="text"
-                        placeholder="0x..."
-                        value={lineaRecipientInput}
-                        onChange={(event) =>
-                          setLineaRecipientInput(event.target.value)
-                        }
-                        className={cn(
-                          "h-10 w-full rounded-xl border border-border/80 bg-muted/30 px-3 font-mono text-[11px] text-foreground outline-none transition placeholder:text-muted-foreground/60 focus:border-primary/60 focus:bg-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-                          !isCustomLineaRecipientValid &&
-                            "border-destructive/60 focus:border-destructive/70",
-                        )}
-                      />
-                    ) : null}
-                    {useCustomLineaRecipient && !isCustomLineaRecipientValid ? (
+                    {lineaRecipientInput && !isLineaRecipientValid ? (
                       <p className="text-xs text-destructive">
                         Enter a valid EVM address.
                       </p>

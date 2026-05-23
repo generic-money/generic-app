@@ -7,6 +7,8 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps, InputHTMLAttributes, ReactNode } from "react";
+import type { LineaNativeBridgeRecord } from "@/lib/linea/native-bridge";
+import type { StatusExitProgressRecord } from "@/lib/status/exit-progress";
 import { DepositSwap } from "./deposit-swap";
 
 const opportunityRouteMocks = vi.hoisted(() => ({
@@ -32,32 +34,43 @@ const hookMocks = vi.hoisted(() => ({
 }));
 
 const lineaNativeBridgeMocks = vi.hoisted(() => ({
-  loadLineaNativeBridgeRecords: vi.fn(() => []),
-  pruneLineaNativeBridgeRecords: vi.fn((records) => records),
+  loadLineaNativeBridgeRecords: vi.fn<() => LineaNativeBridgeRecord[]>(
+    () => [],
+  ),
+  pruneLineaNativeBridgeRecords: vi.fn(
+    (records: LineaNativeBridgeRecord[]) => records,
+  ),
   saveLineaNativeBridgeRecords: vi.fn(),
-  upsertLineaNativeBridgeRecord: vi.fn((records, record) => [
-    record,
-    ...records,
-  ]),
+  upsertLineaNativeBridgeRecord: vi.fn(
+    (records: LineaNativeBridgeRecord[], record: LineaNativeBridgeRecord) => [
+      record,
+      ...records,
+    ],
+  ),
 }));
 
 const statusExitProgressMocks = vi.hoisted(() => ({
-  clearStatusExitProgressRecord: vi.fn((records, account) =>
-    records.filter(
-      (record: { account: string }) =>
-        record.account.toLowerCase() !== account.toLowerCase(),
-    ),
+  clearStatusExitProgressRecord: vi.fn(
+    (records: StatusExitProgressRecord[], account: string) =>
+      records.filter(
+        (record) => record.account.toLowerCase() !== account.toLowerCase(),
+      ),
   ),
-  loadStatusExitProgressRecords: vi.fn(() => []),
-  pruneStatusExitProgressRecords: vi.fn((records) => records),
+  loadStatusExitProgressRecords: vi.fn<() => StatusExitProgressRecord[]>(
+    () => [],
+  ),
+  pruneStatusExitProgressRecords: vi.fn(
+    (records: StatusExitProgressRecord[]) => records,
+  ),
   saveStatusExitProgressRecords: vi.fn(),
-  upsertStatusExitProgressRecord: vi.fn((records, record) => [
-    record,
-    ...records.filter(
-      (item: { account: string }) =>
-        item.account.toLowerCase() !== record.account.toLowerCase(),
-    ),
-  ]),
+  upsertStatusExitProgressRecord: vi.fn(
+    (records: StatusExitProgressRecord[], record: StatusExitProgressRecord) => [
+      record,
+      ...records.filter(
+        (item) => item.account.toLowerCase() !== record.account.toLowerCase(),
+      ),
+    ],
+  ),
 }));
 
 vi.mock("next/image", () => ({
@@ -366,6 +379,7 @@ test("requires recipient confirmation before enabling Status withdrawals", async
   ).toBeEnabled();
   expect(screen.queryByText(/status claim/i)).not.toBeInTheDocument();
   expect(screen.getByText(/bridge to linea mainnet/i)).toBeInTheDocument();
+  expect(screen.queryByText(/15-20 minutes/i)).not.toBeInTheDocument();
   expect(
     screen.queryByText(/required after redeeming/i),
   ).not.toBeInTheDocument();
@@ -382,6 +396,64 @@ test("requires recipient confirmation before enabling Status withdrawals", async
       args: [STATUS_CHAIN_NICKNAME, ACCOUNT, ACCOUNT_BYTES32],
     }),
   );
+});
+
+test("shows the CCTP wait estimate while USDC bridge attestation is pending", async () => {
+  setOpportunityRoute("predeposit", "redeem");
+  wagmiMocks.useAccount.mockReturnValue({ address: ACCOUNT });
+  const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+    Promise.resolve(
+      new Response(
+        JSON.stringify({
+          messages: [{ status: "pending_confirmations" }],
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+    ),
+  );
+  window.localStorage.setItem(
+    "generic.cctpBridgeRecords",
+    JSON.stringify([
+      {
+        txHash:
+          "0x2222222222222222222222222222222222222222222222222222222222222222",
+        account: ACCOUNT,
+        amount: "1000000",
+        recipient: ACCOUNT,
+        sourceDomain: 0,
+        destinationDomain: 11,
+        status: "submitted",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    ]),
+  );
+
+  render(<DepositSwap />);
+
+  expect(
+    await screen.findByRole("button", {
+      name: /waiting for circle attestation/i,
+    }),
+  ).toBeDisabled();
+  expect(
+    await screen.findByText(/Circle is waiting for Ethereum finality/i),
+  ).toBeInTheDocument();
+  expect(screen.getByText(/15-20 minutes/i)).toBeInTheDocument();
+  expect(
+    screen.getByRole("link", { name: /view ethereum tx/i }),
+  ).toHaveAttribute(
+    "href",
+    "https://etherscan.io/tx/0x2222222222222222222222222222222222222222222222222222222222222222",
+  );
+  expect(screen.getByRole("link", { name: /circle status/i })).toHaveAttribute(
+    "href",
+    "https://iris-api.circle.com/v2/messages/0?transactionHash=0x2222222222222222222222222222222222222222222222222222222222222222",
+  );
+  fetchSpy.mockRestore();
 });
 
 test("keeps submitted Linea native bridges in a pending claim state", async () => {
@@ -416,11 +488,12 @@ test("keeps submitted Linea native bridges in a pending claim state", async () =
     await screen.findByRole("button", { name: /usdt bridge pending claim/i }),
   ).toBeDisabled();
   expect(screen.getByText(/pending destination claim/i)).toBeInTheDocument();
+  expect(screen.getByText(/usually takes 15-20 minutes/i)).toBeInTheDocument();
   expect(
     screen.getByRole("link", { name: /open linea bridge/i }),
   ).toHaveAttribute("href", "https://bridge.linea.build/");
   expect(
-    screen.getByRole("link", { name: /view lineascan deposits/i }),
+    screen.getByRole("link", { name: /track on lineascan/i }),
   ).toHaveAttribute("href", "https://lineascan.build/txsDeposits");
 });
 

@@ -10,8 +10,11 @@ export type CctpBridgeRecord = {
   sourceDomain: number;
   destinationDomain: number;
   status: "submitted" | "attested" | "minted";
+  attestationStatus?: string;
   message?: HexData;
   attestation?: HexData;
+  forwardState?: string;
+  forwardTxHash?: HexData;
   createdAt: number;
   updatedAt: number;
   finalizedAt?: number;
@@ -21,7 +24,23 @@ type CctpIrisMessage = {
   message?: HexData;
   attestation?: HexData | "PENDING";
   status?: "complete" | "pending_confirmations" | string;
+  forwardState?: string;
+  forwardTxHash?: HexData;
 };
+
+export type CctpAttestationStatus =
+  | {
+      phase: "complete";
+      status: "complete";
+      message: HexData;
+      attestation: HexData;
+      forwardState?: string;
+      forwardTxHash?: HexData;
+    }
+  | {
+      phase: "pending";
+      status: "not_observed" | "pending" | "pending_confirmations" | string;
+    };
 
 const CCTP_STORAGE_KEY = "generic.cctpBridgeRecords";
 const RECORD_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -79,7 +98,7 @@ export const upsertCctpBridgeRecord = (
   return [...withoutRecord, record];
 };
 
-export const fetchCctpAttestation = async ({
+export const fetchCctpStatus = async ({
   txHash,
   sourceDomain,
 }: {
@@ -92,7 +111,7 @@ export const fetchCctpAttestation = async ({
   );
 
   if (response.status === 404) {
-    return null;
+    return { phase: "pending", status: "not_observed" } as const;
   }
 
   if (!response.ok) {
@@ -103,18 +122,24 @@ export const fetchCctpAttestation = async ({
   const message = payload.messages?.[0];
 
   if (
-    !message ||
-    message.status !== "complete" ||
-    !message.message ||
-    message.message === "0x" ||
-    !message.attestation ||
-    message.attestation === "PENDING"
+    message?.status === "complete" &&
+    message.message &&
+    message.message !== "0x" &&
+    message.attestation &&
+    message.attestation !== "PENDING"
   ) {
-    return null;
+    return {
+      phase: "complete",
+      status: "complete",
+      message: message.message,
+      attestation: message.attestation,
+      forwardState: message.forwardState,
+      forwardTxHash: message.forwardTxHash,
+    } as const;
   }
 
   return {
-    message: message.message,
-    attestation: message.attestation,
-  };
+    phase: "pending",
+    status: message?.status ?? "not_observed",
+  } as const;
 };

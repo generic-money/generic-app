@@ -46,7 +46,7 @@ import { type RedeemSource, useOpportunityRoute } from "@/context";
 import { pushAlert } from "@/lib/alerts";
 import {
   type CctpBridgeRecord,
-  fetchCctpAttestation,
+  fetchCctpStatus,
   loadCctpBridgeRecords,
   pruneCctpBridgeRecords,
   saveCctpBridgeRecords,
@@ -259,6 +259,8 @@ const CITREA_RPC_URL = "https://rpc.mainnet.citrea.xyz";
 const ENABLE_LZ_LOGS = process.env.NODE_ENV !== "production";
 const LZ_STATUS_POLL_INTERVAL_MS = 15_000;
 const CCTP_STATUS_POLL_INTERVAL_MS = 15_000;
+const CCTP_STANDARD_TRANSFER_ESTIMATE = "15-20 minutes";
+const LINEA_NATIVE_BRIDGE_ESTIMATE = "15-20 minutes";
 const AUTO_STAKE_WAIT_TIMEOUT_MS = 15 * 60 * 1000;
 const FOLLOW_UP_TX_CONFIRMATIONS = 2;
 const BRIDGE_COORDINATOR_L2_ADDRESS =
@@ -307,6 +309,21 @@ const parseStoredAmount = (value?: string) => {
 
 const formatTxHash = (hash: HexBytes) =>
   `${hash.slice(0, 6)}...${hash.slice(-4)}`;
+
+const getCctpStatusHref = (record: CctpBridgeRecord) =>
+  `https://iris-api.circle.com/v2/messages/${record.sourceDomain}?transactionHash=${record.txHash}`;
+
+const getCctpSubmittedMessage = (status?: string) => {
+  if (status === "pending_confirmations" || status === "pending") {
+    return `USDC bridge submitted. Circle is waiting for Ethereum finality, usually ${CCTP_STANDARD_TRANSFER_ESTIMATE}.`;
+  }
+
+  if (status === "not_observed") {
+    return `USDC bridge submitted. Circle is indexing the Ethereum burn, usually ${CCTP_STANDARD_TRANSFER_ESTIMATE}.`;
+  }
+
+  return `USDC bridge submitted. Waiting for Circle attestation, usually ${CCTP_STANDARD_TRANSFER_ESTIMATE}.`;
+};
 
 const getTxExplorer = (chainId?: number) => {
   if (chainId === LINEA_CHAIN_ID) {
@@ -491,7 +508,8 @@ const buildLayerZeroMessage = (hash: HexBytes) => (
 const buildLineaNativeBridgeMessage = (hash: HexBytes) => (
   <span className="inline-flex flex-wrap items-center gap-1.5">
     <span>Ethereum tx {formatTxHash(hash)} confirmed.</span>
-    <span>Track or claim the destination transfer in</span>
+    <span>Linea transfer usually takes {LINEA_NATIVE_BRIDGE_ESTIMATE}.</span>
+    <span>Track or claim it in</span>
     <a
       href={LINEA_BRIDGE_URL}
       target="_blank"
@@ -2346,29 +2364,55 @@ export function DepositSwap() {
       cctpPollInFlightRef.current = true;
 
       try {
-        const attestation = await fetchCctpAttestation({
+        const cctpStatus = await fetchCctpStatus({
           txHash: pendingCctpRecord.txHash,
           sourceDomain: pendingCctpRecord.sourceDomain,
         });
 
-        if (cancelled || !attestation) {
+        if (cancelled) {
           return;
         }
 
-        setCctpBridgeRecords((current) =>
-          current.map((record) =>
-            record.txHash.toLowerCase() ===
-            pendingCctpRecord.txHash.toLowerCase()
-              ? {
-                  ...record,
-                  status: "attested",
-                  message: attestation.message,
-                  attestation: attestation.attestation,
-                  updatedAt: Date.now(),
-                }
-              : record,
-          ),
-        );
+        const now = Date.now();
+        setCctpBridgeRecords((current) => {
+          let didChange = false;
+
+          const next = current.map((record): CctpBridgeRecord => {
+            if (
+              record.txHash.toLowerCase() !==
+              pendingCctpRecord.txHash.toLowerCase()
+            ) {
+              return record;
+            }
+
+            if (cctpStatus.phase === "complete") {
+              didChange = true;
+              return {
+                ...record,
+                status: "attested",
+                attestationStatus: cctpStatus.status,
+                message: cctpStatus.message,
+                attestation: cctpStatus.attestation,
+                forwardState: cctpStatus.forwardState,
+                forwardTxHash: cctpStatus.forwardTxHash,
+                updatedAt: now,
+              };
+            }
+
+            if (record.attestationStatus === cctpStatus.status) {
+              return record;
+            }
+
+            didChange = true;
+            return {
+              ...record,
+              attestationStatus: cctpStatus.status,
+              updatedAt: now,
+            };
+          });
+
+          return didChange ? next : current;
+        });
       } catch (error) {
         if (ENABLE_LZ_LOGS) {
           console.warn("CCTP poll: attestation fetch failed", {
@@ -5258,13 +5302,37 @@ export function DepositSwap() {
                 </p>
               ) : null}
               {isPredepositRedeem && pendingCctpRecord ? (
-                <p className="text-center text-xs text-muted-foreground">
-                  {pendingCctpRecord.status === "submitted"
-                    ? "USDC bridge submitted. Waiting for Circle attestation."
-                    : activeChainId === LINEA_CHAIN_ID
-                      ? "Attestation ready. Claim USDC on Linea to finish."
-                      : "Attestation ready. Switch to Linea to claim USDC."}
-                </p>
+                <div className="space-y-2 text-center text-xs text-muted-foreground">
+                  <p>
+                    {pendingCctpRecord.status === "submitted"
+                      ? getCctpSubmittedMessage(
+                          pendingCctpRecord.attestationStatus,
+                        )
+                      : activeChainId === LINEA_CHAIN_ID
+                        ? "Attestation ready. Claim USDC on Linea to finish."
+                        : "Attestation ready. Switch to Linea to claim USDC."}
+                  </p>
+                  {pendingCctpRecord.status === "submitted" ? (
+                    <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
+                      <a
+                        href={`https://etherscan.io/tx/${pendingCctpRecord.txHash}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-medium text-foreground underline underline-offset-4"
+                      >
+                        View Ethereum tx
+                      </a>
+                      <a
+                        href={getCctpStatusHref(pendingCctpRecord)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-medium text-foreground underline underline-offset-4"
+                      >
+                        Circle status
+                      </a>
+                    </div>
+                  ) : null}
+                </div>
               ) : null}
               {isPredepositRedeem && statusExitProgress ? (
                 <div className="rounded-xl border border-border/60 bg-background/70 p-3 text-center text-xs text-muted-foreground">
@@ -5278,8 +5346,9 @@ export function DepositSwap() {
                   <p>
                     {pendingLineaNativeBridgeRecord.ticker} bridge pending
                     destination claim. The Ethereum bridge transaction is
-                    confirmed, but the Linea side may still need to be claimed
-                    before funds arrive.
+                    confirmed, and the Linea side usually takes{" "}
+                    {LINEA_NATIVE_BRIDGE_ESTIMATE}. It may still need to be
+                    claimed before funds arrive.
                   </p>
                   <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
                     <a
@@ -5296,7 +5365,7 @@ export function DepositSwap() {
                       rel="noreferrer"
                       className="font-medium text-foreground underline underline-offset-4"
                     >
-                      View LineaScan deposits
+                      Track on LineaScan
                     </a>
                   </div>
                 </div>

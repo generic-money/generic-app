@@ -216,6 +216,9 @@ const STATUS_CHAIN_NICKNAME =
   "0xa4fdc657c7ba2402ba336e88c4ae1c72169f7bc116987c8aefd50982676d9a17";
 const ACCOUNT_BYTES32 =
   "0x0000000000000000000000000000000000000000000000000000000000001234";
+const CCTP_MESSAGE_NONCE =
+  "0x1111111111111111111111111111111111111111111111111111111111111111";
+const CCTP_MESSAGE_WITH_NONCE = `0x${"00".repeat(12)}${CCTP_MESSAGE_NONCE.slice(2)}${"00".repeat(104)}`;
 const GENERIC_UNIT = "0x8c307baDbd78bEa5A1cCF9677caa58e7A2172502";
 const USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
 const USDC_VAULT = "0x4825eFF24F9B7b76EEAFA2ecc6A1D5dFCb3c1c3f";
@@ -253,6 +256,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   window.history.pushState({}, "", "/");
   window.localStorage.clear();
+  window.sessionStorage.clear();
   delete window.gmTxReview;
   lineaNativeBridgeMocks.loadLineaNativeBridgeRecords.mockReturnValue([]);
   lineaNativeBridgeMocks.pruneLineaNativeBridgeRecords.mockImplementation(
@@ -409,6 +413,166 @@ test("requires recipient confirmation before enabling Status withdrawals", async
   );
 });
 
+test("keeps edited Status Linea recipient after remount without confirming it", async () => {
+  setOpportunityRoute("predeposit", "redeem");
+  wagmiMocks.useAccount.mockReturnValue({ address: ACCOUNT });
+  wagmiMocks.useReadContract.mockImplementation(
+    ({ functionName }: { functionName?: string }) => ({
+      data: functionName === "getPredeposit" ? BigInt(1_000_000) : undefined,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    }),
+  );
+  hookMocks.useErc4626Preview.mockReturnValue({
+    quote: "1",
+    rawQuote: BigInt(1_000_000),
+    parsedAmount: BigInt(1_000_000),
+    isError: false,
+    isFetching: false,
+    isLoading: false,
+  });
+  hookMocks.useRedeemVaultLiquidity.mockReturnValue({
+    status: "idle",
+    selectedVault: {
+      ticker: "USDC",
+      tokenAddress: USDC,
+      vaultAddress: USDC_VAULT,
+      decimals: 6,
+      availableAmountRaw: "1000000",
+      availableFormatted: "1",
+      normalizedAmountRaw: "1000000000000000000",
+    },
+    data: { vaults: [] },
+    refresh: vi.fn(),
+  });
+  const user = userEvent.setup();
+
+  const { unmount } = render(<DepositSwap />);
+  const recipientInput = await screen.findByRole("textbox", {
+    name: /recipient on linea mainnet/i,
+  });
+
+  await user.clear(recipientInput);
+  await user.type(recipientInput, RECIPIENT_ACCOUNT);
+  await user.click(
+    screen.getByRole("checkbox", {
+      name: /i control this recipient on linea mainnet/i,
+    }),
+  );
+  await waitFor(() =>
+    expect(
+      window.sessionStorage.getItem("generic.statusLineaRecipientDrafts"),
+    ).toContain(RECIPIENT_ACCOUNT),
+  );
+
+  unmount();
+  render(<DepositSwap />);
+
+  expect(
+    await screen.findByRole("textbox", {
+      name: /recipient on linea mainnet/i,
+    }),
+  ).toHaveDisplayValue(RECIPIENT_ACCOUNT);
+  expect(
+    screen.getByRole("checkbox", {
+      name: /i control this recipient on linea mainnet/i,
+    }),
+  ).not.toBeChecked();
+  expect(
+    screen.getByRole("button", { name: /confirm linea recipient/i }),
+  ).toBeDisabled();
+});
+
+test("does not loop when restored Status progress uses an unsupported stablecoin", async () => {
+  setOpportunityRoute("predeposit", "redeem");
+  wagmiMocks.useAccount.mockReturnValue({ address: ACCOUNT });
+  wagmiMocks.useReadContract.mockImplementation(
+    ({ functionName }: { functionName?: string }) => ({
+      data: functionName === "getPredeposit" ? BigInt(0) : undefined,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    }),
+  );
+  statusExitProgressMocks.loadStatusExitProgressRecords.mockReturnValue([
+    {
+      account: ACCOUNT,
+      stage: "gunit",
+      ticker: "USDS",
+      chainNickname: STATUS_CHAIN_NICKNAME,
+      remoteRecipient: ACCOUNT_BYTES32,
+      genericUnitTokenAddress: GENERIC_UNIT,
+      stablecoinAddress: "0xdC035D45d973E3EC169d2276DDab16f1e407384F",
+      vaultAddress: "0x6133dA4Cd25773Ebd38542a8aCEF8F94cA89892A",
+      bridgeRequested: true,
+      bridgeRecipient: ACCOUNT,
+      shares: "1000000",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    },
+  ]);
+
+  render(<DepositSwap />);
+
+  expect(
+    await screen.findByRole("button", { name: /preparing recovery/i }),
+  ).toBeDisabled();
+});
+
+test("uses a newer recipient draft over an older Status progress recipient", async () => {
+  setOpportunityRoute("predeposit", "redeem");
+  wagmiMocks.useAccount.mockReturnValue({ address: ACCOUNT });
+  wagmiMocks.useReadContract.mockImplementation(
+    ({ functionName }: { functionName?: string }) => ({
+      data: functionName === "getPredeposit" ? BigInt(0) : undefined,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    }),
+  );
+  const progressUpdatedAt = Date.now() - 1_000;
+  statusExitProgressMocks.loadStatusExitProgressRecords.mockReturnValue([
+    {
+      account: ACCOUNT,
+      stage: "gunit",
+      ticker: "USDC",
+      chainNickname: STATUS_CHAIN_NICKNAME,
+      remoteRecipient: ACCOUNT_BYTES32,
+      genericUnitTokenAddress: GENERIC_UNIT,
+      stablecoinAddress: USDC,
+      vaultAddress: USDC_VAULT,
+      bridgeRequested: true,
+      bridgeRecipient: ACCOUNT,
+      shares: "1000000",
+      createdAt: progressUpdatedAt,
+      updatedAt: progressUpdatedAt,
+    },
+  ]);
+  window.sessionStorage.setItem(
+    "generic.statusLineaRecipientDrafts",
+    JSON.stringify({
+      [ACCOUNT.toLowerCase()]: {
+        recipient: RECIPIENT_ACCOUNT,
+        updatedAt: progressUpdatedAt + 500,
+      },
+    }),
+  );
+
+  render(<DepositSwap />);
+
+  expect(
+    await screen.findByRole("textbox", {
+      name: /recipient on linea mainnet/i,
+    }),
+  ).toHaveDisplayValue(RECIPIENT_ACCOUNT);
+  expect(
+    screen.getByRole("checkbox", {
+      name: /i control this recipient on linea mainnet/i,
+    }),
+  ).not.toBeChecked();
+});
+
 test("shows the CCTP wait estimate while USDC bridge attestation is pending", async () => {
   setOpportunityRoute("predeposit", "redeem");
   wagmiMocks.useAccount.mockReturnValue({ address: ACCOUNT });
@@ -494,14 +658,154 @@ test("shows ready CCTP claims when connected as the Linea recipient", async () =
   render(<DepositSwap />);
 
   expect(
-    await screen.findByRole("button", { name: /claim usdc on linea/i }),
+    await screen.findByRole("button", { name: /finalize usdc on linea/i }),
   ).toBeEnabled();
   expect(
-    screen.getByText(/attestation ready. claim usdc on linea/i),
+    screen.getByText(/attestation ready. waiting for usdc to arrive/i),
   ).toBeInTheDocument();
   expect(
     screen.queryByRole("button", { name: /switch to recipient wallet/i }),
   ).not.toBeInTheDocument();
+});
+
+test("marks CCTP bridges delivered when the Linea message is already used", async () => {
+  setOpportunityRoute("predeposit", "redeem");
+  wagmiMocks.useAccount.mockReturnValue({ address: RECIPIENT_ACCOUNT });
+  wagmiMocks.useChainId.mockReturnValue(59144);
+  const readContract = vi.fn().mockResolvedValue(BigInt(1));
+  wagmiMocks.usePublicClient.mockReturnValue({
+    readContract,
+    waitForTransactionReceipt: vi.fn(),
+  });
+  window.localStorage.setItem(
+    "generic.cctpBridgeRecords",
+    JSON.stringify([
+      {
+        txHash:
+          "0x3535353535353535353535353535353535353535353535353535353535353535",
+        account: ACCOUNT,
+        amount: "1000000",
+        recipient: RECIPIENT_ACCOUNT,
+        sourceDomain: 0,
+        destinationDomain: 11,
+        status: "attested",
+        message: CCTP_MESSAGE_WITH_NONCE,
+        attestation: "0xabcd",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    ]),
+  );
+
+  render(<DepositSwap />);
+
+  expect(
+    await screen.findByText(/USDC was delivered on Linea automatically/i),
+  ).toBeInTheDocument();
+  expect(readContract).toHaveBeenCalledWith(
+    expect.objectContaining({
+      functionName: "usedNonces",
+      args: [CCTP_MESSAGE_NONCE],
+    }),
+  );
+  expect(
+    screen.queryByRole("button", { name: /finalize usdc on linea/i }),
+  ).not.toBeInTheDocument();
+});
+
+test("treats already-used CCTP claim errors as delivered", async () => {
+  setOpportunityRoute("predeposit", "redeem");
+  wagmiMocks.useAccount.mockReturnValue({ address: RECIPIENT_ACCOUNT });
+  wagmiMocks.useChainId.mockReturnValue(59144);
+  wagmiMocks.usePublicClient.mockReturnValue({
+    readContract: vi.fn().mockResolvedValue(BigInt(0)),
+    waitForTransactionReceipt: vi.fn(),
+  });
+  const writeContractAsync = vi
+    .fn()
+    .mockRejectedValue(new Error("execution reverted: Nonce already used"));
+  wagmiMocks.useWriteContract.mockReturnValue({ writeContractAsync });
+  window.localStorage.setItem(
+    "generic.cctpBridgeRecords",
+    JSON.stringify([
+      {
+        txHash:
+          "0x3636363636363636363636363636363636363636363636363636363636363636",
+        account: ACCOUNT,
+        amount: "1000000",
+        recipient: RECIPIENT_ACCOUNT,
+        sourceDomain: 0,
+        destinationDomain: 11,
+        status: "attested",
+        message: CCTP_MESSAGE_WITH_NONCE,
+        attestation: "0xabcd",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    ]),
+  );
+  const user = userEvent.setup();
+
+  render(<DepositSwap />);
+
+  await user.click(
+    await screen.findByRole("button", {
+      name: /finalize usdc on linea/i,
+    }),
+  );
+
+  expect(
+    await screen.findByText(/USDC was delivered on Linea automatically/i),
+  ).toBeInTheDocument();
+  expect(screen.queryByText(/USDC claim failed/i)).not.toBeInTheDocument();
+});
+
+test("flags missing Linea gas before claiming ready CCTP USDC", async () => {
+  setOpportunityRoute("predeposit", "redeem");
+  wagmiMocks.useAccount.mockReturnValue({ address: RECIPIENT_ACCOUNT });
+  wagmiMocks.useChainId.mockReturnValue(59144);
+  wagmiMocks.useBalance.mockImplementation(
+    ({ chainId, token }: { chainId?: number; token?: unknown }) => ({
+      data:
+        chainId === 59144 && !token
+          ? { value: BigInt(0), formatted: "0", symbol: "ETH" }
+          : undefined,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    }),
+  );
+  window.localStorage.setItem(
+    "generic.cctpBridgeRecords",
+    JSON.stringify([
+      {
+        txHash:
+          "0x3434343434343434343434343434343434343434343434343434343434343434",
+        account: ACCOUNT,
+        amount: "1000000",
+        recipient: RECIPIENT_ACCOUNT,
+        sourceDomain: 0,
+        destinationDomain: 11,
+        status: "attested",
+        message: "0x1234",
+        attestation: "0xabcd",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    ]),
+  );
+
+  render(<DepositSwap />);
+
+  expect(
+    await screen.findByRole("button", { name: /finalize usdc on linea/i }),
+  ).toBeDisabled();
+  expect(
+    screen.getByText(/needs ETH on Linea to pay gas/i),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("link", { name: /bridge eth to linea/i }),
+  ).toHaveAttribute("href", "https://bridge.linea.build/");
 });
 
 test("prompts mismatched CCTP claim wallets while allowing permissionless claim", async () => {
@@ -547,11 +851,14 @@ test("prompts mismatched CCTP claim wallets while allowing permissionless claim"
     }),
   );
   expect(appKitMocks.open).toHaveBeenCalledWith({ view: "Account" });
-  expect(screen.getByText(/USDC will be minted to/i)).toBeInTheDocument();
+  expect(screen.queryByText(/USDC will be minted to/i)).not.toBeInTheDocument();
+  expect(
+    screen.getByText(/funds will arrive at the Linea recipient/i),
+  ).toBeInTheDocument();
 
   await user.click(
     screen.getByRole("button", {
-      name: /claim to recipient from this wallet/i,
+      name: /finalize to recipient from this wallet/i,
     }),
   );
 
@@ -610,7 +917,7 @@ test("keeps submitted Linea native bridges in a pending claim state", async () =
   ).toHaveAttribute("href", "https://lineascan.build/txsDeposits");
 });
 
-test("allows Status exits to continue from withdrawn GUnits", async () => {
+test("requires recipient confirmation when continuing from withdrawn GUnits", async () => {
   setOpportunityRoute("predeposit", "redeem");
   wagmiMocks.useAccount.mockReturnValue({ address: ACCOUNT });
   wagmiMocks.useReadContract.mockImplementation(
@@ -660,11 +967,31 @@ test("allows Status exits to continue from withdrawn GUnits", async () => {
       updatedAt: Date.now(),
     },
   ]);
+  const user = userEvent.setup();
 
   render(<DepositSwap />);
 
+  const recipientInput = await screen.findByRole("textbox", {
+    name: /recipient on linea mainnet/i,
+  });
+  const recipientCheckbox = screen.getByRole("checkbox", {
+    name: /i control this recipient on linea mainnet/i,
+  });
+
+  expect(recipientInput).toHaveDisplayValue(ACCOUNT);
+  expect(recipientInput).toBeEnabled();
+  expect(recipientCheckbox).not.toBeChecked();
   expect(
-    await screen.findByRole("button", {
+    screen.getByRole("button", { name: /confirm linea recipient/i }),
+  ).toBeDisabled();
+
+  await user.clear(recipientInput);
+  await user.type(recipientInput, RECIPIENT_ACCOUNT);
+  await user.click(recipientCheckbox);
+
+  expect(recipientInput).toHaveDisplayValue(RECIPIENT_ACCOUNT);
+  expect(
+    screen.getByRole("button", {
       name: /continue redeem & bridge/i,
     }),
   ).toBeEnabled();
@@ -673,7 +1000,7 @@ test("allows Status exits to continue from withdrawn GUnits", async () => {
   ).toBeInTheDocument();
 });
 
-test("allows Status exits to continue from redeemed collateral", async () => {
+test("allows Status exits to continue from redeemed collateral after recipient confirmation", async () => {
   setOpportunityRoute("predeposit", "redeem");
   wagmiMocks.useAccount.mockReturnValue({ address: ACCOUNT });
   wagmiMocks.useReadContract.mockImplementation(
@@ -709,9 +1036,15 @@ test("allows Status exits to continue from redeemed collateral", async () => {
       updatedAt: Date.now(),
     },
   ]);
+  const user = userEvent.setup();
 
   render(<DepositSwap />);
 
+  await user.click(
+    await screen.findByRole("checkbox", {
+      name: /i control this recipient on linea mainnet/i,
+    }),
+  );
   expect(
     await screen.findByRole("button", { name: /continue bridge/i }),
   ).toBeEnabled();

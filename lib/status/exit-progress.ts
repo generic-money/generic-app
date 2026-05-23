@@ -95,7 +95,9 @@ export const upsertStatusExitProgressRecord = (
 ) => {
   const account = record.account.toLowerCase();
   const withoutRecord = records.filter(
-    (item) => item.account.toLowerCase() !== account,
+    (item) =>
+      typeof item.account !== "string" ||
+      item.account.toLowerCase() !== account,
   );
 
   return [record, ...withoutRecord];
@@ -107,7 +109,9 @@ export const clearStatusExitProgressRecord = (
 ) => {
   const normalized = account.toLowerCase();
   const next = records.filter(
-    (record) => record.account.toLowerCase() !== normalized,
+    (record) =>
+      typeof record.account !== "string" ||
+      record.account.toLowerCase() !== normalized,
   );
 
   return next.length === records.length ? records : next;

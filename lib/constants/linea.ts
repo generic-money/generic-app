@@ -69,6 +69,13 @@ export const cctpTokenMessengerV2Abi = [
 export const cctpMessageTransmitterV2Abi = [
   {
     type: "function",
+    name: "usedNonces",
+    stateMutability: "view",
+    inputs: [{ name: "", type: "bytes32" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    type: "function",
     name: "receiveMessage",
     stateMutability: "nonpayable",
     inputs: [

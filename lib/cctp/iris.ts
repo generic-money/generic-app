@@ -15,6 +15,8 @@ export type CctpBridgeRecord = {
   attestation?: HexData;
   forwardState?: string;
   forwardTxHash?: HexData;
+  mintTxHash?: HexData;
+  completionSource?: "manual" | "automatic" | "forwarded";
   createdAt: number;
   updatedAt: number;
   finalizedAt?: number;

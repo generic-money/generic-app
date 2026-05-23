@@ -1,6 +1,7 @@
 "use client";
 
 import { Options } from "@layerzerolabs/lz-v2-utilities";
+import { modal } from "@reown/appkit/react";
 import { ArrowUpDown } from "lucide-react";
 import Image from "next/image";
 import {
@@ -310,6 +311,9 @@ const parseStoredAmount = (value?: string) => {
 const formatTxHash = (hash: HexBytes) =>
   `${hash.slice(0, 6)}...${hash.slice(-4)}`;
 
+const formatAddress = (address: string) =>
+  `${address.slice(0, 6)}...${address.slice(-4)}`;
+
 const getCctpStatusHref = (record: CctpBridgeRecord) =>
   `https://iris-api.circle.com/v2/messages/${record.sourceDomain}?transactionHash=${record.txHash}`;
 
@@ -323,6 +327,30 @@ const getCctpSubmittedMessage = (status?: string) => {
   }
 
   return `USDC bridge submitted. Waiting for Circle attestation, usually ${CCTP_STANDARD_TRANSFER_ESTIMATE}.`;
+};
+
+const getCctpClaimErrorMessage = (error: unknown) => {
+  const message = error instanceof Error ? error.message : "";
+  const normalized = message.toLowerCase();
+
+  if (
+    normalized.includes("request expired") ||
+    normalized.includes("request timeout") ||
+    normalized.includes("timed out")
+  ) {
+    return "The wallet request expired. Open your wallet and try again.";
+  }
+
+  if (
+    normalized.includes("user rejected") ||
+    normalized.includes("user denied") ||
+    normalized.includes("rejected the request") ||
+    normalized.includes("transaction rejected")
+  ) {
+    return "Transaction rejected in wallet.";
+  }
+
+  return "USDC claim failed. Check the Circle status and try again.";
 };
 
 const getTxExplorer = (chainId?: number) => {
@@ -1846,10 +1874,12 @@ export function DepositSwap() {
       return null;
     }
 
+    const normalizedAccount = accountAddress.toLowerCase();
     return (
       cctpBridgeRecords.find(
         (record) =>
-          record.account.toLowerCase() === accountAddress.toLowerCase() &&
+          (record.account.toLowerCase() === normalizedAccount ||
+            record.recipient.toLowerCase() === normalizedAccount) &&
           record.status !== "minted",
       ) ?? null
     );
@@ -1872,6 +1902,12 @@ export function DepositSwap() {
       (pendingCctpRecord.status === "attested"
         ? pendingCctpRecord.message && pendingCctpRecord.attestation
         : statusTxReviewHasSkip("attestation")),
+  );
+  const isPendingCctpRecipientMismatch = Boolean(
+    accountAddress &&
+      pendingCctpRecord &&
+      pendingCctpRecord.recipient.toLowerCase() !==
+        accountAddress.toLowerCase(),
   );
   const trimmedLineaRecipient = lineaRecipientInput.trim();
   const isLineaRecipientValid = isAddress(trimmedLineaRecipient);
@@ -2570,6 +2606,10 @@ export function DepositSwap() {
         return { label: `Switch to ${LINEA_CHAIN_LABEL}`, disabled: false };
       }
 
+      if (isPendingCctpRecipientMismatch) {
+        return { label: "Switch to recipient wallet", disabled: false };
+      }
+
       return { label: "Claim USDC on Linea", disabled: false };
     }
 
@@ -2756,6 +2796,7 @@ export function DepositSwap() {
     isDepositFlow,
     isAutoStakeFlowInProgress,
     isGunitRedeem,
+    isPendingCctpRecipientMismatch,
     isLineaRecipientConfirmed,
     isLineaRecipientValid,
     isOnMainnet,
@@ -3977,8 +4018,7 @@ export function DepositSwap() {
         ),
       );
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Linea claim failed";
+      const message = getCctpClaimErrorMessage(error);
       setTxError(message);
       pushAlert({
         type: "error",
@@ -3988,6 +4028,11 @@ export function DepositSwap() {
     } finally {
       setTxStep("idle");
     }
+  };
+
+  const handleOpenRecipientWalletPrompt = () => {
+    setTxError(null);
+    void modal?.open({ view: "Account" });
   };
 
   const handleStatusExit = async () => {
@@ -4740,6 +4785,15 @@ export function DepositSwap() {
 
     try {
       if (isPredepositRedeem && pendingCctpRecord) {
+        if (
+          pendingCctpAttestationReady &&
+          activeChainId === LINEA_CHAIN_ID &&
+          isPendingCctpRecipientMismatch
+        ) {
+          handleOpenRecipientWalletPrompt();
+          return;
+        }
+
         await handleClaimCctpOnLinea();
         return;
       }
@@ -5312,6 +5366,42 @@ export function DepositSwap() {
                         ? "Attestation ready. Claim USDC on Linea to finish."
                         : "Attestation ready. Switch to Linea to claim USDC."}
                   </p>
+                  {isPendingCctpRecipientMismatch && accountAddress ? (
+                    <div className="space-y-2 rounded-xl border border-amber-300/70 bg-amber-50 px-3 py-2 text-left text-amber-950">
+                      <p>
+                        USDC will be minted to{" "}
+                        <span
+                          className="font-mono font-semibold"
+                          title={pendingCctpRecord.recipient}
+                        >
+                          {formatAddress(pendingCctpRecord.recipient)}
+                        </span>
+                        . You are connected as{" "}
+                        <span
+                          className="font-mono font-semibold"
+                          title={accountAddress}
+                        >
+                          {formatAddress(accountAddress)}
+                        </span>
+                        .
+                      </p>
+                      <p>
+                        Claiming can be submitted from this wallet, but the
+                        funds will arrive at the Linea recipient.
+                      </p>
+                      {pendingCctpAttestationReady &&
+                      activeChainId === LINEA_CHAIN_ID ? (
+                        <button
+                          type="button"
+                          onClick={handleClaimCctpOnLinea}
+                          disabled={txStep === "submitting"}
+                          className="font-medium text-amber-950 underline underline-offset-4 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Claim to recipient from this wallet
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {pendingCctpRecord.status === "submitted" ? (
                     <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
                       <a

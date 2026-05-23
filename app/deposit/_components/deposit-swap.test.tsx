@@ -33,6 +33,10 @@ const hookMocks = vi.hoisted(() => ({
   useTokenAllowance: vi.fn(),
 }));
 
+const appKitMocks = vi.hoisted(() => ({
+  open: vi.fn(),
+}));
+
 const lineaNativeBridgeMocks = vi.hoisted(() => ({
   loadLineaNativeBridgeRecords: vi.fn<() => LineaNativeBridgeRecord[]>(
     () => [],
@@ -75,6 +79,12 @@ const statusExitProgressMocks = vi.hoisted(() => ({
 
 vi.mock("next/image", () => ({
   default: (_props: ComponentProps<"img">) => <div data-testid="next-image" />,
+}));
+
+vi.mock("@reown/appkit/react", () => ({
+  modal: {
+    open: appKitMocks.open,
+  },
 }));
 
 vi.mock("wagmi", () => ({
@@ -201,6 +211,7 @@ vi.mock("./redeem-liquidity-notice", () => ({
 const PAUSED_MESSAGE =
   "Deposits on the Status networks are paused as the chain moves towards its next stage. Funds are safe, you'll hear next steps very soon.";
 const ACCOUNT = "0x0000000000000000000000000000000000001234";
+const RECIPIENT_ACCOUNT = "0x0000000000000000000000000000000000005678";
 const STATUS_CHAIN_NICKNAME =
   "0xa4fdc657c7ba2402ba336e88c4ae1c72169f7bc116987c8aefd50982676d9a17";
 const ACCOUNT_BYTES32 =
@@ -454,6 +465,108 @@ test("shows the CCTP wait estimate while USDC bridge attestation is pending", as
     "https://iris-api.circle.com/v2/messages/0?transactionHash=0x2222222222222222222222222222222222222222222222222222222222222222",
   );
   fetchSpy.mockRestore();
+});
+
+test("shows ready CCTP claims when connected as the Linea recipient", async () => {
+  setOpportunityRoute("predeposit", "redeem");
+  wagmiMocks.useAccount.mockReturnValue({ address: RECIPIENT_ACCOUNT });
+  wagmiMocks.useChainId.mockReturnValue(59144);
+  window.localStorage.setItem(
+    "generic.cctpBridgeRecords",
+    JSON.stringify([
+      {
+        txHash:
+          "0x3333333333333333333333333333333333333333333333333333333333333333",
+        account: ACCOUNT,
+        amount: "1000000",
+        recipient: RECIPIENT_ACCOUNT,
+        sourceDomain: 0,
+        destinationDomain: 11,
+        status: "attested",
+        message: "0x1234",
+        attestation: "0xabcd",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    ]),
+  );
+
+  render(<DepositSwap />);
+
+  expect(
+    await screen.findByRole("button", { name: /claim usdc on linea/i }),
+  ).toBeEnabled();
+  expect(
+    screen.getByText(/attestation ready. claim usdc on linea/i),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: /switch to recipient wallet/i }),
+  ).not.toBeInTheDocument();
+});
+
+test("prompts mismatched CCTP claim wallets while allowing permissionless claim", async () => {
+  setOpportunityRoute("predeposit", "redeem");
+  wagmiMocks.useAccount.mockReturnValue({ address: ACCOUNT });
+  wagmiMocks.useChainId.mockReturnValue(59144);
+  const waitForTransactionReceipt = vi.fn().mockResolvedValue({});
+  wagmiMocks.usePublicClient.mockReturnValue({ waitForTransactionReceipt });
+  const writeContractAsync = vi
+    .fn()
+    .mockRejectedValue(
+      new Error(
+        "An unknown RPC error occurred. data: 0x57ecfd28 Details: Request expired. Please try again.",
+      ),
+    );
+  wagmiMocks.useWriteContract.mockReturnValue({ writeContractAsync });
+  window.localStorage.setItem(
+    "generic.cctpBridgeRecords",
+    JSON.stringify([
+      {
+        txHash:
+          "0x4444444444444444444444444444444444444444444444444444444444444444",
+        account: ACCOUNT,
+        amount: "1000000",
+        recipient: RECIPIENT_ACCOUNT,
+        sourceDomain: 0,
+        destinationDomain: 11,
+        status: "attested",
+        message: "0x1234",
+        attestation: "0xabcd",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    ]),
+  );
+  const user = userEvent.setup();
+
+  render(<DepositSwap />);
+
+  await user.click(
+    await screen.findByRole("button", {
+      name: /switch to recipient wallet/i,
+    }),
+  );
+  expect(appKitMocks.open).toHaveBeenCalledWith({ view: "Account" });
+  expect(screen.getByText(/USDC will be minted to/i)).toBeInTheDocument();
+
+  await user.click(
+    screen.getByRole("button", {
+      name: /claim to recipient from this wallet/i,
+    }),
+  );
+
+  await waitFor(() =>
+    expect(writeContractAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        functionName: "receiveMessage",
+        chainId: 59144,
+      }),
+    ),
+  );
+  expect(
+    await screen.findByText(/wallet request expired/i),
+  ).toBeInTheDocument();
+  expect(screen.queryByText(/0x57ecfd28/i)).not.toBeInTheDocument();
 });
 
 test("keeps submitted Linea native bridges in a pending claim state", async () => {

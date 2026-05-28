@@ -30,6 +30,16 @@ Use `.env.local` for local configuration.
 - `NEXT_PUBLIC_HIDE_USDT_ON_REDEEM`: Feature flag (default `false`). Set to `true` or `1` to hide `USDT` from redemption dropdowns while keeping deposits enabled.
 - `NEXT_PUBLIC_HIDE_USDC_USDT_ON_REDEEM`: Convenience flag to hide both `USDC` and `USDT` on redeem.
 
+## Status Transaction Review
+
+In development and test builds, open the app with `?gmTxReview=1` to log each Status withdrawal transaction payload before it reaches the wallet. Review mode is disabled in production builds. The deposit experience lives at `/`; `/deposit` redirects there and preserves query parameters. Add `gmSkip` flags as needed, for example:
+
+```text
+/?gmTxReview=1&gmSkip=send,balance,liquidity,attestation
+```
+
+Available skip flags are `predeposit`, `liquidity`, `balance`, `allowance`, `send`, `receipt`, and `attestation`. Use `send` when an impersonator can show `eth_sendTransaction` payloads but cannot actually sign or broadcast them; the app logs the request, returns a fake tx hash, and pauses. In the browser console, use `window.gmTxReview.status()`, `advanceToGUnits({ shares })`, `advanceToCollateral({ amount })`, `markBridgeSubmitted({ amount, txHash, recipient })`, and `clear()` to move through impersonator tests without signing real transactions.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

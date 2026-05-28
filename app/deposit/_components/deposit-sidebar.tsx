@@ -11,6 +11,12 @@ import { useEffect, useMemo, useState } from "react";
 import { createPublicClient, erc20Abi, formatUnits, http } from "viem";
 import { useAccount, useBalance, useReadContract } from "wagmi";
 import { type RedeemSource, useOpportunityRoute } from "@/context";
+import {
+  type CctpBridgeRecord,
+  loadCctpBridgeRecords,
+  pruneCctpBridgeRecords,
+  saveCctpBridgeRecords,
+} from "@/lib/cctp/iris";
 import { CHAIN_ID_BY_NAME, CHAINS } from "@/lib/constants/chains";
 import { getGenericUnitTokenAddress } from "@/lib/constants/contracts";
 import {
@@ -24,6 +30,14 @@ import {
   pruneLzBridgeRecords,
   saveLzBridgeRecords,
 } from "@/lib/layerzero/scan";
+import {
+  LINEA_BRIDGE_URL,
+  LINEASCAN_L1_TO_L2_URL,
+  type LineaNativeBridgeRecord,
+  loadLineaNativeBridgeRecords,
+  pruneLineaNativeBridgeRecords,
+  saveLineaNativeBridgeRecords,
+} from "@/lib/linea/native-bridge";
 import { gusd } from "@/lib/models/tokens";
 import { type HexAddress, ZERO_ADDRESS } from "@/lib/types/address";
 import { cn } from "@/lib/utils";
@@ -36,6 +50,9 @@ type DepositSidebarProps = {
 
 const toBytes32 = (value: HexAddress) =>
   `0x${value.slice(2).padStart(64, "0")}` as const;
+
+const normalizeStoredAddress = (value: unknown) =>
+  typeof value === "string" ? value.toLowerCase() : undefined;
 
 const bridgeCoordinatorAbi = [
   {
@@ -60,9 +77,27 @@ type BalanceLike = {
   } | null;
 };
 
+type PendingBridgeItem = {
+  key: string;
+  createdAt: number;
+  directionLabel: string;
+  statusLabel: string;
+  badgeLabel: string;
+  completeLabel: string;
+  isFinal: boolean;
+  progress: number;
+  remainingMs: number;
+  etaLabel: string;
+  primaryLinkHref: string;
+  primaryLinkLabel: string;
+  secondaryLinkHref?: string;
+  secondaryLinkLabel?: string;
+};
+
 const POSITION_PRECISION = 4;
 const USD_PRECISION = 2;
 const BRIDGE_ETA_MS = 4 * 60 * 1000 + 30 * 1000;
+const LINEA_BRIDGE_ETA_MS = 20 * 60 * 1000;
 const CITREA_RPC_URL = "https://rpc.mainnet.citrea.xyz";
 const CITREA_WHITELABEL_ADDRESS =
   "0xAC8c1AEB584765DB16ac3e08D4736CFcE198589B" as const satisfies HexAddress;
@@ -116,6 +151,9 @@ const formatDuration = (ms: number) => {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 };
 
+const getCircleStatusHref = (record: CctpBridgeRecord) =>
+  `https://iris-api.circle.com/v2/messages/${record.sourceDomain}?transactionHash=${record.txHash}`;
+
 export function DepositSidebar({ className }: DepositSidebarProps = {}) {
   const [open, setOpen] = useState(false);
   const { address: accountAddress } = useAccount();
@@ -145,6 +183,12 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
   const [isCitreaVaultLoading, setIsCitreaVaultLoading] = useState(false);
   const [isCitreaVaultError, setIsCitreaVaultError] = useState(false);
   const [lzBridgeRecords, setLzBridgeRecords] = useState<LzBridgeRecord[]>([]);
+  const [cctpBridgeRecords, setCctpBridgeRecords] = useState<
+    CctpBridgeRecord[]
+  >([]);
+  const [lineaNativeBridgeRecords, setLineaNativeBridgeRecords] = useState<
+    LineaNativeBridgeRecord[]
+  >([]);
   const [now, setNow] = useState(() => Date.now());
   const citreaFetchEnabled = Boolean(
     accountAddress && CITREA_WHITELABEL_ADDRESS,
@@ -322,7 +366,11 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
   ]);
 
   useEffect(() => {
-    const loadRecords = () => setLzBridgeRecords(loadLzBridgeRecords());
+    const loadRecords = () => {
+      setLzBridgeRecords(loadLzBridgeRecords());
+      setCctpBridgeRecords(loadCctpBridgeRecords());
+      setLineaNativeBridgeRecords(loadLineaNativeBridgeRecords());
+    };
     loadRecords();
 
     const interval = window.setInterval(loadRecords, 15000);
@@ -352,6 +400,20 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
       const pruned = pruneLzBridgeRecords(current, now);
       if (pruned !== current) {
         saveLzBridgeRecords(pruned);
+      }
+      return pruned;
+    });
+    setCctpBridgeRecords((current) => {
+      const pruned = pruneCctpBridgeRecords(current, now);
+      if (pruned !== current) {
+        saveCctpBridgeRecords(pruned);
+      }
+      return pruned;
+    });
+    setLineaNativeBridgeRecords((current) => {
+      const pruned = pruneLineaNativeBridgeRecords(current, now);
+      if (pruned !== current) {
+        saveLineaNativeBridgeRecords(pruned);
       }
       return pruned;
     });
@@ -437,33 +499,145 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
       return [];
     }
 
+    const normalizedAccount = accountAddress.toLowerCase();
     return lzBridgeRecords.filter(
-      (record) => record.account.toLowerCase() === accountAddress.toLowerCase(),
+      (record) => normalizeStoredAddress(record.account) === normalizedAccount,
     );
   }, [accountAddress, lzBridgeRecords]);
-  const pendingBridgeItems = bridgeRecords.map((record) => {
-    const statusLabel = (record.status ?? "pending")
-      .replace(/_/g, " ")
-      .toLowerCase()
-      .replace(/^./, (char) => char.toUpperCase());
-    const isFinal = isFinalLzStatus(record.status);
-    const elapsedMs = Math.max(0, now - record.createdAt);
-    const progress = Math.min(1, elapsedMs / BRIDGE_ETA_MS);
-    const remainingMs = Math.max(0, BRIDGE_ETA_MS - elapsedMs);
-    return {
-      key: `${record.txHash}-${record.direction}`,
-      txHash: record.txHash,
-      directionLabel:
-        record.direction === "l1-to-citrea"
-          ? "Ethereum → Citrea"
-          : "Citrea → Ethereum",
-      statusLabel,
-      isFinal,
-      isDelivered: (record.status ?? "").toUpperCase() === "DELIVERED",
-      progress,
-      remainingMs,
-    };
-  });
+  const cctpRecordsForAccount = useMemo(() => {
+    if (!accountAddress) {
+      return [];
+    }
+
+    const normalizedAccount = accountAddress.toLowerCase();
+    return cctpBridgeRecords.filter((record) => {
+      const recordAccount = normalizeStoredAddress(record.account);
+      const recordRecipient = normalizeStoredAddress(record.recipient);
+
+      return (
+        recordAccount === normalizedAccount ||
+        recordRecipient === normalizedAccount
+      );
+    });
+  }, [accountAddress, cctpBridgeRecords]);
+  const pendingLineaNativeBridgeRecords = useMemo(() => {
+    if (!accountAddress) {
+      return [];
+    }
+
+    const normalizedAccount = accountAddress.toLowerCase();
+    return lineaNativeBridgeRecords.filter((record) => {
+      const recordAccount = normalizeStoredAddress(record.account);
+      const recordRecipient = normalizeStoredAddress(record.recipient);
+
+      return (
+        recordAccount === normalizedAccount ||
+        recordRecipient === normalizedAccount
+      );
+    });
+  }, [accountAddress, lineaNativeBridgeRecords]);
+  const pendingBridgeItems = useMemo<PendingBridgeItem[]>(() => {
+    const lzItems = bridgeRecords.map((record) => {
+      const statusLabel = (record.status ?? "pending")
+        .replace(/_/g, " ")
+        .toLowerCase()
+        .replace(/^./, (char) => char.toUpperCase());
+      const isFinal = isFinalLzStatus(record.status);
+      const elapsedMs = Math.max(0, now - record.createdAt);
+      const progress = Math.min(1, elapsedMs / BRIDGE_ETA_MS);
+      const remainingMs = Math.max(0, BRIDGE_ETA_MS - elapsedMs);
+
+      return {
+        key: `${record.txHash}-${record.direction}`,
+        createdAt: record.createdAt,
+        directionLabel:
+          record.direction === "l1-to-citrea"
+            ? "Ethereum → Citrea"
+            : "Citrea → Ethereum",
+        statusLabel,
+        badgeLabel: isFinal ? "Complete" : "Pending",
+        completeLabel:
+          (record.status ?? "").toUpperCase() === "DELIVERED"
+            ? "Bridge completed"
+            : "Bridge failed",
+        isFinal,
+        progress,
+        remainingMs,
+        etaLabel: "ETA 4:30",
+        primaryLinkHref: `https://layerzeroscan.com/tx/${record.txHash}`,
+        primaryLinkLabel: "View on LayerZero Scan",
+      };
+    });
+
+    const cctpItems = cctpRecordsForAccount.map((record) => {
+      const elapsedMs = Math.max(0, now - record.createdAt);
+      const isAttested = record.status === "attested";
+      const isMinted = record.status === "minted";
+      const progress =
+        isAttested || isMinted
+          ? 1
+          : Math.min(0.95, elapsedMs / LINEA_BRIDGE_ETA_MS);
+      const statusLabel = isMinted
+        ? record.completionSource === "manual"
+          ? "USDC delivered on Linea"
+          : "USDC delivered automatically"
+        : isAttested
+          ? "Ready to finalize on Linea"
+          : record.attestationStatus === "not_observed"
+            ? "Circle is indexing the burn"
+            : "Waiting for Circle attestation";
+
+      return {
+        key: `${record.txHash}-cctp`,
+        createdAt: record.createdAt,
+        directionLabel: "USDC Ethereum → Linea",
+        statusLabel,
+        badgeLabel: isMinted ? "Delivered" : isAttested ? "Ready" : "Pending",
+        completeLabel: isMinted ? "USDC delivered" : "Ready to finalize",
+        isFinal: isMinted || isAttested,
+        progress,
+        remainingMs: Math.max(0, LINEA_BRIDGE_ETA_MS - elapsedMs),
+        etaLabel: "ETA 15-20m",
+        primaryLinkHref: getCircleStatusHref(record),
+        primaryLinkLabel: "Circle status",
+        secondaryLinkHref: record.mintTxHash
+          ? `https://lineascan.build/tx/${record.mintTxHash}`
+          : `https://etherscan.io/tx/${record.txHash}`,
+        secondaryLinkLabel: record.mintTxHash ? "Linea tx" : "Ethereum tx",
+      };
+    });
+
+    const lineaNativeItems = pendingLineaNativeBridgeRecords.map((record) => {
+      const elapsedMs = Math.max(0, now - record.createdAt);
+      const progress = Math.min(0.95, elapsedMs / LINEA_BRIDGE_ETA_MS);
+
+      return {
+        key: `${record.txHash}-linea-native`,
+        createdAt: record.createdAt,
+        directionLabel: `${record.ticker} Ethereum → Linea`,
+        statusLabel: "Waiting on Linea bridge",
+        badgeLabel: "Pending",
+        completeLabel: "Pending Linea claim",
+        isFinal: false,
+        progress,
+        remainingMs: Math.max(0, LINEA_BRIDGE_ETA_MS - elapsedMs),
+        etaLabel: "ETA 15-20m",
+        primaryLinkHref: LINEA_BRIDGE_URL,
+        primaryLinkLabel: "Open Linea bridge",
+        secondaryLinkHref: LINEASCAN_L1_TO_L2_URL,
+        secondaryLinkLabel: "Track on LineaScan",
+      };
+    });
+
+    return [...lzItems, ...cctpItems, ...lineaNativeItems].sort(
+      (a, b) => b.createdAt - a.createdAt,
+    );
+  }, [
+    bridgeRecords,
+    cctpRecordsForAccount,
+    now,
+    pendingLineaNativeBridgeRecords,
+  ]);
 
   const unitTokenValue = useMemo(
     () => formatTokenBalance(unitBalance, accountAddress),
@@ -553,7 +727,8 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
         hasUnits,
       ].filter(Boolean).length
     : 0;
-  const showEmptyState = positionsCount === 0;
+  const portfolioBadgeCount = positionsCount + pendingBridgeItems.length;
+  const showEmptyState = portfolioBadgeCount === 0;
 
   const scrollToDeposit = () => {
     const target = document.getElementById("deposit");
@@ -657,9 +832,7 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
                           </p>
                           {item.isFinal ? (
                             <p className="mt-1 text-[11px] text-muted-foreground">
-                              {item.isDelivered
-                                ? "Bridge completed"
-                                : "Bridge failed"}
+                              {item.completeLabel}
                             </p>
                           ) : (
                             <p className="mt-1 text-[11px] text-muted-foreground">
@@ -668,7 +841,7 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
                           )}
                         </div>
                         <span className="rounded-full border border-border/60 bg-background/70 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                          {item.isFinal ? "Complete" : "Pending"}
+                          {item.badgeLabel}
                         </span>
                       </div>
                       <div className="mt-3 space-y-2">
@@ -682,7 +855,7 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
                           <div className="flex items-center justify-between text-[10px] text-muted-foreground">
                             {item.remainingMs > 0 ? (
                               <>
-                                <span>ETA 4:30</span>
+                                <span>{item.etaLabel}</span>
                                 <span>
                                   {formatDuration(item.remainingMs)} left
                                 </span>
@@ -693,14 +866,26 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
                           </div>
                         ) : null}
                       </div>
-                      <a
-                        href={`https://layerzeroscan.com/tx/${item.txHash}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mt-3 inline-flex text-[10px] italic text-muted-foreground transition hover:text-foreground"
-                      >
-                        View on LayerZero Scan
-                      </a>
+                      <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1">
+                        <a
+                          href={item.primaryLinkHref}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex text-[10px] italic text-muted-foreground transition hover:text-foreground"
+                        >
+                          {item.primaryLinkLabel}
+                        </a>
+                        {item.secondaryLinkHref ? (
+                          <a
+                            href={item.secondaryLinkHref}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex text-[10px] italic text-muted-foreground transition hover:text-foreground"
+                          >
+                            {item.secondaryLinkLabel}
+                          </a>
+                        ) : null}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -821,13 +1006,19 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
                         {statusPredepositTokenValue}
                       </p>
                       <p className="mt-2 whitespace-nowrap text-[10px] text-muted-foreground">
-                        Unlocks when Status L2 goes live
+                        Ready to withdraw
                       </p>
                     </div>
                     <div className="flex shrink-0 flex-col items-end">
-                      <span className="rounded-full border border-border/60 bg-background/70 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                        Locked
-                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleSelectOpportunity("predeposit", "redeem")
+                        }
+                        className="rounded-full border border-border/60 bg-background/70 px-3 py-1 text-[11px] font-semibold text-foreground/80 transition hover:border-primary/30 hover:bg-background hover:text-foreground"
+                      >
+                        Withdraw
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -887,7 +1078,7 @@ export function DepositSidebar({ className }: DepositSidebarProps = {}) {
             <ChevronLeft className="h-4 w-4" />
           </span>
           <div className="flex h-6 min-w-6 items-center justify-center rounded-full bg-primary text-[11px] font-semibold text-primary-foreground shadow-sm">
-            {positionsCount}
+            {portfolioBadgeCount}
           </div>
           <span className="text-[11px] font-semibold uppercase tracking-[0.35em] text-muted-foreground [writing-mode:vertical-rl] [text-orientation:upright] group-hover:text-foreground">
             Portfolio

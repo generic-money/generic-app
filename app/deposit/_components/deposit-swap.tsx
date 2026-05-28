@@ -1,6 +1,7 @@
 "use client";
 
 import { Options } from "@layerzerolabs/lz-v2-utilities";
+import { modal } from "@reown/appkit/react";
 import { ArrowUpDown } from "lucide-react";
 import Image from "next/image";
 import {
@@ -18,6 +19,7 @@ import {
   erc4626Abi,
   formatUnits,
   http,
+  isAddress,
   type PublicClient,
   parseUnits,
 } from "viem";
@@ -43,11 +45,34 @@ import {
 } from "@/components/ui/select";
 import { type RedeemSource, useOpportunityRoute } from "@/context";
 import { pushAlert } from "@/lib/alerts";
+import {
+  type CctpBridgeRecord,
+  fetchCctpStatus,
+  loadCctpBridgeRecords,
+  pruneCctpBridgeRecords,
+  saveCctpBridgeRecords,
+  upsertCctpBridgeRecord,
+} from "@/lib/cctp/iris";
 import { CHAINS, getChainNameById } from "@/lib/constants/chains";
 import {
   getGenericDepositorAddress,
   getGenericUnitTokenAddress,
 } from "@/lib/constants/contracts";
+import {
+  CCTP_ETHEREUM_DOMAIN,
+  CCTP_LINEA_DOMAIN,
+  CCTP_MESSAGE_TRANSMITTER_V2_ADDRESS,
+  CCTP_STANDARD_FINALITY_THRESHOLD,
+  CCTP_TOKEN_MESSENGER_V2_ADDRESS,
+  cctpMessageTransmitterV2Abi,
+  cctpTokenMessengerV2Abi,
+  LINEA_CHAIN_ID,
+  LINEA_CHAIN_LABEL,
+  LINEA_TOKEN_BRIDGE_ADDRESS,
+  lineaMessageServiceAbi,
+  lineaTokenBridgeAbi,
+  ZERO_BYTES32,
+} from "@/lib/constants/linea";
 import {
   getOpportunityHref,
   OPPORTUNITY_APY_CAP,
@@ -68,7 +93,24 @@ import {
   saveLzBridgeRecords,
   upsertLzBridgeRecord,
 } from "@/lib/layerzero/scan";
+import {
+  LINEA_BRIDGE_URL,
+  LINEASCAN_L1_TO_L2_URL,
+  type LineaNativeBridgeRecord,
+  loadLineaNativeBridgeRecords,
+  pruneLineaNativeBridgeRecords,
+  saveLineaNativeBridgeRecords,
+  upsertLineaNativeBridgeRecord,
+} from "@/lib/linea/native-bridge";
 import { getStablecoins, gusd } from "@/lib/models/tokens";
+import {
+  clearStatusExitProgressRecord,
+  loadStatusExitProgressRecords,
+  pruneStatusExitProgressRecords,
+  type StatusExitProgressRecord,
+  saveStatusExitProgressRecords,
+  upsertStatusExitProgressRecord,
+} from "@/lib/status/exit-progress";
 import { type HexAddress, ZERO_ADDRESS } from "@/lib/types/address";
 import { cn } from "@/lib/utils";
 import { useErc20Decimals } from "./hooks/useErc20Decimals";
@@ -80,6 +122,13 @@ import {
   sortLiquidityVaults,
 } from "./redeem-liquidity";
 import { RedeemLiquidityNotice } from "./redeem-liquidity-notice";
+import {
+  getStatusTxReviewConfig,
+  hasStatusTxReviewSkip,
+  logStatusTxReviewEvent,
+  parseStatusTxReviewAmount,
+  type StatusTxReviewRequest,
+} from "./status-tx-review";
 import { SwapAssetPanel } from "./swap-asset-panel";
 import { formatBalanceText, formatTokenAmount } from "./utils/format";
 import { VaultAvailabilityDialog } from "./vault-availability-dialog";
@@ -153,6 +202,18 @@ const bridgeCoordinatorPredepositAbi = [
     ],
     outputs: [{ name: "amount", type: "uint256" }],
   },
+  {
+    type: "function",
+    name: "withdrawPredeposit",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "chainNickname", type: "bytes32" },
+      { name: "remoteRecipient", type: "bytes32" },
+      { name: "recipient", type: "address" },
+      { name: "whitelabel", type: "address" },
+    ],
+    outputs: [],
+  },
 ] as const;
 
 type AssetType = "stablecoin" | "gusd" | "gunit";
@@ -198,7 +259,14 @@ const CITREA_NATIVE_BALANCE_THRESHOLD = BigInt(250_000);
 const CITREA_RPC_URL = "https://rpc.mainnet.citrea.xyz";
 const ENABLE_LZ_LOGS = process.env.NODE_ENV !== "production";
 const LZ_STATUS_POLL_INTERVAL_MS = 15_000;
+const CCTP_STATUS_POLL_INTERVAL_MS = 15_000;
+const CCTP_STANDARD_TRANSFER_ESTIMATE = "15-20 minutes";
+const CCTP_MESSAGE_NONCE_OFFSET_BYTES = 12;
+const CCTP_MESSAGE_NONCE_HEX_LENGTH = 64;
+const CCTP_DELIVERY_NOTICE_TTL_MS = 60 * 60 * 1000;
+const LINEA_NATIVE_BRIDGE_ESTIMATE = "15-20 minutes";
 const AUTO_STAKE_WAIT_TIMEOUT_MS = 15 * 60 * 1000;
+const FOLLOW_UP_TX_CONFIRMATIONS = 2;
 const BRIDGE_COORDINATOR_L2_ADDRESS =
   "0x6E810122C2B7d474Ef568bdf221ec05f2dC8063A" as const satisfies HexAddress;
 const BRIDGE_COORDINATOR_L1_ADDRESS = getBridgeCoordinatorAddress(
@@ -219,6 +287,8 @@ const STATUS_DEPOSITS_PAUSED = true;
 const STATUS_DEPOSITS_PAUSED_LABEL = "Deposits paused";
 const STATUS_DEPOSITS_PAUSED_MESSAGE =
   "Deposits on the Status networks are paused as the chain moves towards its next stage. Funds are safe, you'll hear next steps very soon.";
+const STATUS_LINEA_ANNOUNCEMENT_URL =
+  "https://x.com/StatusL2/status/2049922023661695094";
 
 const buildCitreaBridgeParams = (receiver: HexBytes) =>
   Options.newOptions()
@@ -229,8 +299,250 @@ const buildCitreaBridgeParams = (receiver: HexBytes) =>
 const toBytes32 = (value: HexBytes) =>
   `0x${value.slice(2).padStart(64, "0")}` as const;
 
+const normalizeStoredAddress = (value: unknown) =>
+  typeof value === "string" ? value.toLowerCase() : undefined;
+
+const parseStoredAmount = (value?: string) => {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return BigInt(value);
+  } catch {
+    return null;
+  }
+};
+
 const formatTxHash = (hash: HexBytes) =>
   `${hash.slice(0, 6)}...${hash.slice(-4)}`;
+
+const getCctpMessageNonce = (message?: HexData) => {
+  if (!message || !message.startsWith("0x")) {
+    return null;
+  }
+
+  const nonceStart = 2 + CCTP_MESSAGE_NONCE_OFFSET_BYTES * 2;
+  const nonceEnd = nonceStart + CCTP_MESSAGE_NONCE_HEX_LENGTH;
+  if (message.length < nonceEnd) {
+    return null;
+  }
+
+  return `0x${message.slice(nonceStart, nonceEnd)}` as HexData;
+};
+
+type StatusLineaRecipientDraft = {
+  recipient: HexAddress;
+  updatedAt: number;
+};
+
+type StatusLineaRecipientDrafts = Record<string, StatusLineaRecipientDraft>;
+
+const STATUS_LINEA_RECIPIENT_DRAFT_STORAGE_KEY =
+  "generic.statusLineaRecipientDrafts";
+const STATUS_LINEA_RECIPIENT_DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
+
+const getStatusLineaRecipientDraftStorage = () => {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+};
+
+const readStatusLineaRecipientDrafts = (): StatusLineaRecipientDrafts => {
+  const storage = getStatusLineaRecipientDraftStorage();
+  if (!storage) {
+    return {};
+  }
+
+  try {
+    const raw = storage.getItem(STATUS_LINEA_RECIPIENT_DRAFT_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+
+    const now = Date.now();
+    const drafts: StatusLineaRecipientDrafts = {};
+    for (const [account, draft] of Object.entries(parsed)) {
+      if (!isAddress(account) || !draft || typeof draft !== "object") {
+        continue;
+      }
+
+      const candidate = draft as Partial<StatusLineaRecipientDraft>;
+      if (
+        typeof candidate.recipient !== "string" ||
+        !isAddress(candidate.recipient) ||
+        typeof candidate.updatedAt !== "number" ||
+        now - candidate.updatedAt > STATUS_LINEA_RECIPIENT_DRAFT_TTL_MS
+      ) {
+        continue;
+      }
+
+      drafts[account.toLowerCase()] = {
+        recipient: candidate.recipient as HexAddress,
+        updatedAt: candidate.updatedAt,
+      };
+    }
+
+    return drafts;
+  } catch {
+    return {};
+  }
+};
+
+const loadStatusLineaRecipientDraft = (
+  account?: HexAddress,
+): StatusLineaRecipientDraft | null => {
+  if (!account) {
+    return null;
+  }
+
+  return readStatusLineaRecipientDrafts()[account.toLowerCase()] ?? null;
+};
+
+const saveStatusLineaRecipientDraft = (
+  account: HexAddress,
+  recipient: HexAddress,
+) => {
+  const storage = getStatusLineaRecipientDraftStorage();
+  if (!storage) {
+    return;
+  }
+
+  try {
+    const drafts = readStatusLineaRecipientDrafts();
+    drafts[account.toLowerCase()] = {
+      recipient,
+      updatedAt: Date.now(),
+    };
+    storage.setItem(
+      STATUS_LINEA_RECIPIENT_DRAFT_STORAGE_KEY,
+      JSON.stringify(drafts),
+    );
+  } catch {
+    // The visible input remains authoritative for the active transaction.
+  }
+};
+
+const clearStatusLineaRecipientDraft = (account: HexAddress) => {
+  const storage = getStatusLineaRecipientDraftStorage();
+  if (!storage) {
+    return;
+  }
+
+  try {
+    const drafts = readStatusLineaRecipientDrafts();
+    delete drafts[account.toLowerCase()];
+    storage.setItem(
+      STATUS_LINEA_RECIPIENT_DRAFT_STORAGE_KEY,
+      JSON.stringify(drafts),
+    );
+  } catch {
+    // Draft persistence is best effort only.
+  }
+};
+
+const getCctpStatusHref = (record: CctpBridgeRecord) =>
+  `https://iris-api.circle.com/v2/messages/${record.sourceDomain}?transactionHash=${record.txHash}`;
+
+const getCctpSubmittedMessage = (status?: string) => {
+  if (status === "pending_confirmations" || status === "pending") {
+    return `USDC bridge submitted. Circle is waiting for Ethereum finality, usually ${CCTP_STANDARD_TRANSFER_ESTIMATE}.`;
+  }
+
+  if (status === "not_observed") {
+    return `USDC bridge submitted. Circle is indexing the Ethereum burn, usually ${CCTP_STANDARD_TRANSFER_ESTIMATE}.`;
+  }
+
+  return `USDC bridge submitted. Waiting for Circle attestation, usually ${CCTP_STANDARD_TRANSFER_ESTIMATE}.`;
+};
+
+const getCctpClaimErrorMessage = (error: unknown) => {
+  const message = error instanceof Error ? error.message : "";
+  const normalized = message.toLowerCase();
+
+  if (
+    normalized.includes("request expired") ||
+    normalized.includes("request timeout") ||
+    normalized.includes("timed out")
+  ) {
+    return "The wallet request expired. Open your wallet and try again.";
+  }
+
+  if (
+    normalized.includes("user rejected") ||
+    normalized.includes("user denied") ||
+    normalized.includes("rejected the request") ||
+    normalized.includes("transaction rejected")
+  ) {
+    return "Transaction rejected in wallet.";
+  }
+
+  return "USDC claim failed. Check the Circle status and try again.";
+};
+
+const isCctpAlreadyDeliveredError = (error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const normalized = message.toLowerCase();
+
+  return (
+    normalized.includes("nonce already used") ||
+    normalized.includes("message already received") ||
+    normalized.includes("already finalized") ||
+    normalized.includes("already used")
+  );
+};
+
+const getTxExplorer = (chainId?: number) => {
+  if (chainId === LINEA_CHAIN_ID) {
+    return {
+      name: "LineaScan",
+      href: (hash: HexBytes) => `https://lineascan.build/tx/${hash}`,
+    };
+  }
+
+  if (chainId === MAINNET_CHAIN_ID) {
+    return {
+      name: "Etherscan",
+      href: (hash: HexBytes) => `https://etherscan.io/tx/${hash}`,
+    };
+  }
+
+  return null;
+};
+
+const buildTxHashMessage = (hash: HexBytes, chainId?: number) => {
+  const explorer = getTxExplorer(chainId);
+
+  if (!explorer) {
+    return `Hash ${formatTxHash(hash)}`;
+  }
+
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      <span>Hash {formatTxHash(hash)}</span>
+      <span className="text-muted-foreground">·</span>
+      <a
+        href={explorer.href(hash)}
+        target="_blank"
+        rel="noreferrer"
+        className="font-medium text-foreground underline underline-offset-4"
+      >
+        {explorer.name}
+      </a>
+    </span>
+  );
+};
 
 const formatStablecoinAvailability = (
   amount: bigint,
@@ -327,6 +639,35 @@ const estimateLzBridgeFee = async ({
   });
 };
 
+const readLineaTokenBridgeFee = async (client: PublicClient) => {
+  try {
+    const messageService = await client.readContract({
+      abi: lineaTokenBridgeAbi,
+      address: LINEA_TOKEN_BRIDGE_ADDRESS,
+      functionName: "messageService",
+    });
+
+    return await client.readContract({
+      abi: lineaMessageServiceAbi,
+      address: messageService,
+      functionName: "minimumFeeInWei",
+    });
+  } catch {
+    return ZERO_AMOUNT;
+  }
+};
+
+// Wallet RPC simulation can lag the public RPC used for receipts; wait one
+// extra block before follow-up reads, prompts, or transactions.
+const waitForFollowUpTransactionReceipt = (
+  client: PublicClient | null | undefined,
+  hash: HexBytes,
+) =>
+  client?.waitForTransactionReceipt({
+    hash,
+    confirmations: FOLLOW_UP_TX_CONFIRMATIONS,
+  });
+
 const buildLayerZeroMessage = (hash: HexBytes) => (
   <span className="inline-flex flex-wrap items-center gap-1.5">
     <span>Hash {formatTxHash(hash)}</span>
@@ -342,15 +683,42 @@ const buildLayerZeroMessage = (hash: HexBytes) => (
   </span>
 );
 
+const buildLineaNativeBridgeMessage = (hash: HexBytes) => (
+  <span className="inline-flex flex-wrap items-center gap-1.5">
+    <span>Ethereum tx {formatTxHash(hash)} confirmed.</span>
+    <span>Linea transfer usually takes {LINEA_NATIVE_BRIDGE_ESTIMATE}.</span>
+    <span>Track or claim it in</span>
+    <a
+      href={LINEA_BRIDGE_URL}
+      target="_blank"
+      rel="noreferrer"
+      className="font-medium text-foreground underline underline-offset-4"
+    >
+      Linea bridge
+    </a>
+    <span>or</span>
+    <a
+      href={LINEASCAN_L1_TO_L2_URL}
+      target="_blank"
+      rel="noreferrer"
+      className="font-medium text-foreground underline underline-offset-4"
+    >
+      LineaScan
+    </a>
+    <span>.</span>
+  </span>
+);
+
 const notifyTxSubmitted = (
   label: string,
   hash: HexBytes,
   messageOverride?: ReactNode,
+  chainId?: number,
 ) => {
   pushAlert({
     type: "info",
     title: `${label} submitted`,
-    message: messageOverride ?? `Hash ${formatTxHash(hash)}`,
+    message: messageOverride ?? buildTxHashMessage(hash, chainId),
   });
 };
 
@@ -358,11 +726,12 @@ const notifyTxConfirmed = (
   label: string,
   hash: HexBytes,
   messageOverride?: ReactNode,
+  chainId?: number,
 ) => {
   pushAlert({
     type: "success",
     title: `${label} confirmed`,
-    message: messageOverride ?? `Hash ${formatTxHash(hash)}`,
+    message: messageOverride ?? buildTxHashMessage(hash, chainId),
   });
 };
 
@@ -417,11 +786,11 @@ const OPPORTUNITY_OPTIONS: OpportunityOption[] = [
   {
     value: "predeposit",
     eyebrow: "Status L2 GUSD",
-    title: "The gasless network",
-    description: "Be early with the predeposit vaults",
-    badge: `Up to ${OPPORTUNITY_APY_CAP.predeposit} APY`,
-    note: "Unlocks at launch",
-    formDescription: "Start earning rewards before the network goes live",
+    title: "Status withdrawals",
+    description: "Withdraw predeposits into USDC or USDT",
+    badge: "Withdrawals open",
+    note: "Linea Mainnet",
+    formDescription: "Withdraw your Status predeposit into collateral",
     iconSrc: "/chains/status.png",
     iconAlt: "Status",
   },
@@ -505,6 +874,15 @@ export function DepositSwap() {
   const { address: accountAddress } = useAccount();
   const activeChainId = useChainId();
   const chainName = getChainNameById(activeChainId);
+  const statusTxReviewConfig = useMemo(() => getStatusTxReviewConfig(), []);
+  const statusTxReviewHasSkip = useCallback(
+    (skip: Parameters<typeof hasStatusTxReviewSkip>[1]) =>
+      hasStatusTxReviewSkip(statusTxReviewConfig, skip),
+    [statusTxReviewConfig],
+  );
+  const primaryActionInFlightRef = useRef(false);
+  const statusTxReviewDrySendNonceRef = useRef(1);
+  const statusTxReviewDrySubmittedStepsRef = useRef(new Set<string>());
   const {
     route: depositRoute,
     setRoute: setDepositRoute,
@@ -512,16 +890,19 @@ export function DepositSwap() {
     setFlow,
     redeemEntryRequest,
   } = useOpportunityRoute();
-  const isDepositFlow = flow === "deposit";
+  const shouldForceStatusWithdraw =
+    STATUS_DEPOSITS_PAUSED && depositRoute === "predeposit";
+  const effectiveFlow = shouldForceStatusWithdraw ? "redeem" : flow;
+  const isDepositFlow = effectiveFlow === "deposit";
   const isCitreaReturnFlow = !isDepositFlow && depositRoute === "citrea";
   const stablecoinChainName = isCitreaReturnFlow ? CHAINS.MAINNET : chainName;
   const stablecoins = useMemo(
     () => getStablecoins(stablecoinChainName),
     [stablecoinChainName],
   );
-  const selectableStablecoins = useMemo(() => stablecoins, [stablecoins]);
   const publicClient = usePublicClient({ chainId: activeChainId });
   const mainnetClient = usePublicClient({ chainId: MAINNET_CHAIN_ID });
+  const lineaClient = usePublicClient({ chainId: LINEA_CHAIN_ID });
   const { writeContractAsync } = useWriteContract();
   const { switchChainAsync } = useSwitchChain();
   const { data: blockNumber } = useBlockNumber({
@@ -540,7 +921,19 @@ export function DepositSwap() {
     id: number;
     source: RedeemSource;
   } | null>(null);
+  const [lineaRecipientInput, setLineaRecipientInput] = useState("");
+  const [lineaRecipientTouched, setLineaRecipientTouched] = useState(false);
+  const [lineaRecipientConfirmed, setLineaRecipientConfirmed] = useState(false);
+  const previousLineaAccountRef = useRef<string | undefined>(undefined);
+  const previousLineaRecipientSeedRef = useRef<string | undefined>(undefined);
   const isPredepositRedeem = !isDepositFlow && depositRoute === "predeposit";
+  const selectableStablecoins = useMemo(
+    () =>
+      isPredepositRedeem
+        ? stablecoins.filter((coin) => coin.ticker !== "USDS")
+        : stablecoins,
+    [isPredepositRedeem, stablecoins],
+  );
   const isMainnetRedeem =
     !isDepositFlow && !isCitreaReturnFlow && depositRoute === "mainnet";
   const isGunitRedeem = isMainnetRedeem && redeemSource === "gunit";
@@ -581,6 +974,15 @@ export function DepositSwap() {
   const [stakePanelShifted, setStakePanelShifted] = useState(false);
   const [stakePanelVisible, setStakePanelVisible] = useState(false);
   const [lzBridgeRecords, setLzBridgeRecords] = useState<LzBridgeRecord[]>([]);
+  const [cctpBridgeRecords, setCctpBridgeRecords] = useState<
+    CctpBridgeRecord[]
+  >([]);
+  const [lineaNativeBridgeRecords, setLineaNativeBridgeRecords] = useState<
+    LineaNativeBridgeRecord[]
+  >([]);
+  const [statusExitProgressRecords, setStatusExitProgressRecords] = useState<
+    StatusExitProgressRecord[]
+  >([]);
   const [citreaNativeBalance, setCitreaNativeBalance] = useState<bigint | null>(
     null,
   );
@@ -593,12 +995,67 @@ export function DepositSwap() {
     () => createPublicClient({ transport: http(CITREA_RPC_URL) }),
     [],
   );
+  const statusExitProgress = useMemo(() => {
+    if (!accountAddress || !isPredepositRedeem) {
+      return null;
+    }
+
+    const normalizedAccount = accountAddress.toLowerCase();
+    return (
+      statusExitProgressRecords.find(
+        (record) =>
+          normalizeStoredAddress(record.account) === normalizedAccount,
+      ) ?? null
+    );
+  }, [accountAddress, isPredepositRedeem, statusExitProgressRecords]);
+  const statusExitProgressShares = parseStoredAmount(
+    statusExitProgress?.shares,
+  );
+  const statusExitProgressCollateralAmount = parseStoredAmount(
+    statusExitProgress?.collateralAmount,
+  );
+  const isStatusExitGunitResume = statusExitProgress?.stage === "gunit";
+  const isStatusExitCollateralResume =
+    statusExitProgress?.stage === "collateral";
 
   useEffect(() => {
-    if (!selectableStablecoins.find((coin) => coin.ticker === selectedTicker)) {
-      setSelectedTicker(selectableStablecoins[0]?.ticker ?? "USDC");
+    if (!shouldForceStatusWithdraw || flow === "redeem") {
+      return;
+    }
+
+    setFlow("redeem");
+  }, [flow, setFlow, shouldForceStatusWithdraw]);
+
+  useEffect(() => {
+    if (selectableStablecoins.find((coin) => coin.ticker === selectedTicker)) {
+      return;
+    }
+
+    const nextTicker = selectableStablecoins[0]?.ticker ?? "USDC";
+    if (nextTicker !== selectedTicker) {
+      setSelectedTicker(nextTicker);
     }
   }, [selectedTicker, selectableStablecoins]);
+
+  useEffect(() => {
+    if (
+      !isPredepositRedeem ||
+      !statusExitProgress ||
+      statusExitProgress.ticker === selectedTicker ||
+      !selectableStablecoins.find(
+        (coin) => coin.ticker === statusExitProgress.ticker,
+      )
+    ) {
+      return;
+    }
+
+    setSelectedTicker(statusExitProgress.ticker);
+  }, [
+    isPredepositRedeem,
+    selectedTicker,
+    selectableStablecoins,
+    statusExitProgress,
+  ]);
 
   useEffect(() => {
     if (!redeemEntryRequest) {
@@ -642,13 +1099,13 @@ export function DepositSwap() {
     : isCitreaReturnFlow
       ? "Bridge Citrea GUSD back to mainnet, then redeem into your selected stablecoin."
       : isPredepositRedeem
-        ? "Status predeposits are locked until launch."
+        ? "Withdraw your Status predeposit, redeem into collateral, and bridge it to Linea Mainnet."
         : isGunitRedeem
           ? "Redeem GUnits back into your selected stablecoin."
           : "Redeem GUSD back into your selected stablecoin.";
   const showRedeemSourceSelector = isMainnetRedeem;
 
-  const canSwitchDirection = !isDepositFlow || depositRoute !== "predeposit";
+  const canSwitchDirection = !shouldForceStatusWithdraw;
 
   const handleSwitchDirection = () => {
     if (!canSwitchDirection) {
@@ -660,6 +1117,10 @@ export function DepositSwap() {
   };
 
   const handleStablecoinChange = (value: StablecoinTicker) => {
+    if (statusExitProgress) {
+      return;
+    }
+
     setPostMintHref(null);
     setSelectedTicker(value);
   };
@@ -682,6 +1143,13 @@ export function DepositSwap() {
   const vaultAddress = selectedStablecoin?.depositVaultAddress as
     | HexAddress
     | undefined;
+  const isStatusExitProgressSelectionReady =
+    !statusExitProgress ||
+    (statusExitProgress.ticker === selectedTicker &&
+      normalizeStoredAddress(statusExitProgress.stablecoinAddress) ===
+        normalizeStoredAddress(stablecoinAddress) &&
+      normalizeStoredAddress(statusExitProgress.vaultAddress) ===
+        normalizeStoredAddress(vaultAddress));
   const stablecoinChainId = MAINNET_CHAIN_ID;
   const gusdChainId =
     isCitreaReturnFlow && !isOnMainnet
@@ -851,6 +1319,13 @@ export function DepositSwap() {
       enabled: Boolean(accountAddress),
     },
   });
+  const lineaNativeBalance = useBalance({
+    address: accountAddress,
+    chainId: LINEA_CHAIN_ID,
+    query: {
+      enabled: Boolean(accountAddress && isPredepositRedeem),
+    },
+  });
 
   useEffect(() => {
     if (showGunitRedeemSourceOption || redeemSource !== "gunit") {
@@ -879,6 +1354,7 @@ export function DepositSwap() {
       isError: false,
       data: {
         formatted: formatUnits(statusPredepositAmount, gusdDecimals),
+        value: statusPredepositAmount,
       },
     };
   }, [
@@ -890,9 +1366,11 @@ export function DepositSwap() {
 
   const fromAssetType: AssetType = isDepositFlow
     ? "stablecoin"
-    : isGunitRedeem
-      ? "gunit"
-      : "gusd";
+    : isStatusExitCollateralResume
+      ? "stablecoin"
+      : isGunitRedeem || isStatusExitGunitResume
+        ? "gunit"
+        : "gusd";
 
   const toAssetType: AssetType = isDepositFlow ? "gusd" : "stablecoin";
 
@@ -926,6 +1404,105 @@ export function DepositSwap() {
     void selectedTicker;
     setFromAmount("");
   }, [isDepositFlow, selectedTicker]);
+
+  useEffect(() => {
+    if (!isPredepositRedeem) {
+      return;
+    }
+
+    if (isStatusExitGunitResume) {
+      if (statusExitProgressShares == null || genericUnitDecimals == null) {
+        setFromAmount("");
+        return;
+      }
+
+      setFromAmount(formatUnits(statusExitProgressShares, genericUnitDecimals));
+      return;
+    }
+
+    if (isStatusExitCollateralResume) {
+      if (
+        statusExitProgressCollateralAmount == null ||
+        stablecoinDecimals == null
+      ) {
+        setFromAmount("");
+        return;
+      }
+
+      setFromAmount(
+        formatUnits(statusExitProgressCollateralAmount, stablecoinDecimals),
+      );
+      return;
+    }
+
+    if (statusPredepositAmount == null || gusdDecimals == null) {
+      setFromAmount("");
+      return;
+    }
+
+    setFromAmount(formatUnits(statusPredepositAmount, gusdDecimals));
+  }, [
+    genericUnitDecimals,
+    gusdDecimals,
+    isPredepositRedeem,
+    isStatusExitCollateralResume,
+    isStatusExitGunitResume,
+    stablecoinDecimals,
+    statusExitProgressCollateralAmount,
+    statusExitProgressShares,
+    statusPredepositAmount,
+  ]);
+
+  useEffect(() => {
+    if (isPredepositRedeem) {
+      return;
+    }
+
+    setLineaRecipientInput("");
+    setLineaRecipientTouched(false);
+    setLineaRecipientConfirmed(false);
+    previousLineaAccountRef.current = undefined;
+    previousLineaRecipientSeedRef.current = undefined;
+  }, [isPredepositRedeem]);
+
+  useEffect(() => {
+    if (!isPredepositRedeem) {
+      return;
+    }
+
+    const recipientDraft = loadStatusLineaRecipientDraft(accountAddress);
+    const progressRecipient = statusExitProgress?.bridgeRecipient;
+    const shouldUseDraft =
+      recipientDraft &&
+      (!progressRecipient ||
+        recipientDraft.updatedAt > (statusExitProgress?.updatedAt ?? 0));
+    const recipientSeed = shouldUseDraft
+      ? recipientDraft.recipient
+      : (progressRecipient ?? accountAddress);
+
+    if (
+      previousLineaAccountRef.current === accountAddress &&
+      previousLineaRecipientSeedRef.current === recipientSeed
+    ) {
+      if (!lineaRecipientTouched && accountAddress && !lineaRecipientInput) {
+        setLineaRecipientInput(accountAddress);
+      }
+      return;
+    }
+
+    setLineaRecipientInput(recipientSeed ?? "");
+    setLineaRecipientTouched(false);
+    setLineaRecipientConfirmed(false);
+    previousLineaAccountRef.current = accountAddress;
+    previousLineaRecipientSeedRef.current = recipientSeed;
+  }, [
+    accountAddress,
+    isPredepositRedeem,
+    lineaRecipientInput,
+    lineaRecipientTouched,
+    statusExitProgress?.bridgeRecipient,
+    statusExitProgress?.updatedAt,
+  ]);
 
   useEffect(() => {
     if (depositRoute !== "citrea") {
@@ -983,6 +1560,18 @@ export function DepositSwap() {
   }, []);
 
   useEffect(() => {
+    setCctpBridgeRecords(loadCctpBridgeRecords());
+  }, []);
+
+  useEffect(() => {
+    setLineaNativeBridgeRecords(loadLineaNativeBridgeRecords());
+  }, []);
+
+  useEffect(() => {
+    setStatusExitProgressRecords(loadStatusExitProgressRecords());
+  }, []);
+
+  useEffect(() => {
     const pruned = pruneLzBridgeRecords(lzBridgeRecords);
     if (pruned !== lzBridgeRecords) {
       setLzBridgeRecords(pruned);
@@ -990,6 +1579,33 @@ export function DepositSwap() {
     }
     saveLzBridgeRecords(pruned);
   }, [lzBridgeRecords]);
+
+  useEffect(() => {
+    const pruned = pruneCctpBridgeRecords(cctpBridgeRecords);
+    if (pruned !== cctpBridgeRecords) {
+      setCctpBridgeRecords(pruned);
+      return;
+    }
+    saveCctpBridgeRecords(pruned);
+  }, [cctpBridgeRecords]);
+
+  useEffect(() => {
+    const pruned = pruneLineaNativeBridgeRecords(lineaNativeBridgeRecords);
+    if (pruned !== lineaNativeBridgeRecords) {
+      setLineaNativeBridgeRecords(pruned);
+      return;
+    }
+    saveLineaNativeBridgeRecords(pruned);
+  }, [lineaNativeBridgeRecords]);
+
+  useEffect(() => {
+    const pruned = pruneStatusExitProgressRecords(statusExitProgressRecords);
+    if (pruned !== statusExitProgressRecords) {
+      setStatusExitProgressRecords(pruned);
+      return;
+    }
+    saveStatusExitProgressRecords(pruned);
+  }, [statusExitProgressRecords]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -1053,7 +1669,9 @@ export function DepositSwap() {
   ]);
 
   const canUseMax =
-    Boolean(accountAddress) && Boolean(fromBalanceHook.data?.formatted);
+    !isPredepositRedeem &&
+    Boolean(accountAddress) &&
+    Boolean(fromBalanceHook.data?.formatted);
   const isCitreaNativeBalancePending =
     isCitreaDeposit &&
     !isCitreaNativeBalanceError &&
@@ -1101,7 +1719,7 @@ export function DepositSwap() {
 
   const shouldUseVaultPreview = isDepositFlow
     ? !isNonMainnetDeposit && !shouldSwitchChain
-    : !isPredepositRedeem &&
+    : !isStatusExitCollateralResume &&
       !shouldSwitchChain &&
       (!isCitreaReturnFlow || isOnMainnet);
 
@@ -1122,7 +1740,7 @@ export function DepositSwap() {
 
   const shouldGuardRedeemLiquidity =
     !isDepositFlow &&
-    !isPredepositRedeem &&
+    !isStatusExitCollateralResume &&
     (!isCitreaReturnFlow || isOnMainnet) &&
     Boolean(vaultAddress);
   const redeemVaultLiquidity = useRedeemVaultLiquidity({
@@ -1189,8 +1807,9 @@ export function DepositSwap() {
   const estimatedToAmount = shouldUseVaultPreview
     ? previewToAmount
     : fromAmount;
-  const fromPlaceholder =
-    fromAssetType === "stablecoin"
+  const fromPlaceholder = isPredepositRedeem
+    ? "Status predeposit amount"
+    : fromAssetType === "stablecoin"
       ? `Amount in ${selectedStablecoin?.ticker ?? ""}`
       : fromAssetType === "gunit"
         ? "Amount in GUnits"
@@ -1269,7 +1888,9 @@ export function DepositSwap() {
       ? isOnMainnet
         ? needsRedeemApproval
         : needsCitreaApproval
-      : needsRedeemApproval;
+      : isPredepositRedeem
+        ? false
+        : needsRedeemApproval;
   const fromBalanceValue = (() => {
     const data = fromBalanceHook.data;
     if (data && typeof data === "object" && "value" in data) {
@@ -1404,9 +2025,10 @@ export function DepositSwap() {
       return [];
     }
 
+    const normalizedAccount = accountAddress.toLowerCase();
     return lzBridgeRecords.filter(
       (record) =>
-        record.account.toLowerCase() === accountAddress.toLowerCase() &&
+        normalizeStoredAddress(record.account) === normalizedAccount &&
         !isFinalLzStatus(record.status),
     );
   }, [accountAddress, lzBridgeRecords]);
@@ -1420,12 +2042,466 @@ export function DepositSwap() {
   );
   const pendingLzRecordsRef = useRef<LzBridgeRecord[]>(pendingLzRecords);
   const lzStatusPollInFlightRef = useRef(false);
+  const cctpPollInFlightRef = useRef(false);
+  const cctpDeliveryPollInFlightRef = useRef(false);
+  const notifiedCctpDeliveryRef = useRef(new Set<string>());
   const pendingL1ToCitrea = pendingLzRecords.find(
     (record) => record.direction === "l1-to-citrea",
   );
   const pendingCitreaToL1 = pendingLzRecords.find(
     (record) => record.direction === "citrea-to-l1",
   );
+  const pendingCctpRecord = useMemo(() => {
+    if (!accountAddress) {
+      return null;
+    }
+
+    const normalizedAccount = accountAddress.toLowerCase();
+    return (
+      cctpBridgeRecords.find((record) => {
+        const recordAccount = normalizeStoredAddress(record.account);
+        const recordRecipient = normalizeStoredAddress(record.recipient);
+
+        return (
+          (recordAccount === normalizedAccount ||
+            recordRecipient === normalizedAccount) &&
+          record.status !== "minted"
+        );
+      }) ?? null
+    );
+  }, [accountAddress, cctpBridgeRecords]);
+  const latestMintedCctpRecord = useMemo(() => {
+    if (!accountAddress) {
+      return null;
+    }
+
+    const normalizedAccount = accountAddress.toLowerCase();
+    const now = Date.now();
+    return cctpBridgeRecords.reduce<CctpBridgeRecord | null>(
+      (latest, record) => {
+        if (record.status !== "minted") {
+          return latest;
+        }
+
+        if (
+          now - (record.finalizedAt ?? record.updatedAt) >
+          CCTP_DELIVERY_NOTICE_TTL_MS
+        ) {
+          return latest;
+        }
+
+        const recordAccount = normalizeStoredAddress(record.account);
+        const recordRecipient = normalizeStoredAddress(record.recipient);
+        if (
+          recordAccount !== normalizedAccount &&
+          recordRecipient !== normalizedAccount
+        ) {
+          return latest;
+        }
+
+        if (!latest || record.updatedAt > latest.updatedAt) {
+          return record;
+        }
+
+        return latest;
+      },
+      null,
+    );
+  }, [accountAddress, cctpBridgeRecords]);
+  const pendingLineaNativeBridgeRecord = useMemo(() => {
+    if (!accountAddress) {
+      return null;
+    }
+
+    const normalizedAccount = accountAddress.toLowerCase();
+    return (
+      lineaNativeBridgeRecords.find((record) => {
+        const recordAccount = normalizeStoredAddress(record.account);
+        const recordRecipient = normalizeStoredAddress(record.recipient);
+
+        return (
+          (recordAccount === normalizedAccount ||
+            recordRecipient === normalizedAccount) &&
+          record.status === "submitted"
+        );
+      }) ?? null
+    );
+  }, [accountAddress, lineaNativeBridgeRecords]);
+  const pendingCctpAttestationReady = Boolean(
+    pendingCctpRecord &&
+      (pendingCctpRecord.status === "attested"
+        ? pendingCctpRecord.message && pendingCctpRecord.attestation
+        : statusTxReviewHasSkip("attestation")),
+  );
+  const hasNoLineaClaimGas = Boolean(
+    pendingCctpAttestationReady &&
+      lineaNativeBalance.data &&
+      !lineaNativeBalance.isLoading &&
+      !lineaNativeBalance.isError &&
+      lineaNativeBalance.data.value <= ZERO_AMOUNT,
+  );
+  const isPendingCctpRecipientMismatch = Boolean(
+    accountAddress &&
+      pendingCctpRecord &&
+      normalizeStoredAddress(pendingCctpRecord.recipient) != null &&
+      normalizeStoredAddress(pendingCctpRecord.recipient) !==
+        accountAddress.toLowerCase(),
+  );
+  const trimmedLineaRecipient = lineaRecipientInput.trim();
+  const isLineaRecipientValid = isAddress(trimmedLineaRecipient);
+  const lineaRecipient = isLineaRecipientValid
+    ? (trimmedLineaRecipient as HexAddress)
+    : undefined;
+  const isLineaRecipientInteractionDisabled = txStep !== "idle";
+
+  const notifyCctpDelivered = useCallback(
+    (
+      record: CctpBridgeRecord,
+      source: CctpBridgeRecord["completionSource"],
+    ) => {
+      const notificationKey = record.txHash.toLowerCase();
+      if (notifiedCctpDeliveryRef.current.has(notificationKey)) {
+        return;
+      }
+
+      notifiedCctpDeliveryRef.current.add(notificationKey);
+      pushAlert({
+        type: "success",
+        title: "USDC delivered on Linea",
+        message:
+          source === "manual"
+            ? "The Linea mint transaction confirmed."
+            : "The bridge was finalized automatically, so no extra claim transaction is needed.",
+      });
+    },
+    [],
+  );
+
+  const markCctpRecordMinted = useCallback(
+    (
+      record: CctpBridgeRecord,
+      options: {
+        source: NonNullable<CctpBridgeRecord["completionSource"]>;
+        mintTxHash?: HexData;
+        notify?: boolean;
+      },
+    ) => {
+      const now = Date.now();
+
+      setCctpBridgeRecords((current) =>
+        current.map((item) =>
+          item.txHash.toLowerCase() === record.txHash.toLowerCase()
+            ? {
+                ...item,
+                status: "minted",
+                completionSource: options.source,
+                mintTxHash:
+                  options.mintTxHash ?? item.mintTxHash ?? item.forwardTxHash,
+                updatedAt: now,
+                finalizedAt: now,
+              }
+            : item,
+        ),
+      );
+
+      setTxError(null);
+
+      if (options.notify) {
+        notifyCctpDelivered(record, options.source);
+      }
+    },
+    [notifyCctpDelivered],
+  );
+
+  const readCctpDeliveryStatus = useCallback(
+    async (record: CctpBridgeRecord) => {
+      if (
+        !lineaClient ||
+        typeof lineaClient.readContract !== "function" ||
+        !record.message
+      ) {
+        return null;
+      }
+
+      const nonce = getCctpMessageNonce(record.message);
+      if (!nonce) {
+        return null;
+      }
+
+      const usedNonce = await lineaClient.readContract({
+        abi: cctpMessageTransmitterV2Abi,
+        address: CCTP_MESSAGE_TRANSMITTER_V2_ADDRESS,
+        functionName: "usedNonces",
+        args: [nonce],
+      });
+
+      if (usedNonce <= ZERO_AMOUNT) {
+        return null;
+      }
+
+      return {
+        source: record.forwardTxHash ? "forwarded" : "automatic",
+        mintTxHash: record.forwardTxHash,
+      } as const;
+    },
+    [lineaClient],
+  );
+
+  const checkCctpDelivery = useCallback(
+    async (record: CctpBridgeRecord) => {
+      const delivery = await readCctpDeliveryStatus(record);
+      if (!delivery) {
+        return false;
+      }
+
+      markCctpRecordMinted(record, {
+        source: delivery.source,
+        mintTxHash: delivery.mintTxHash,
+        notify: true,
+      });
+      return true;
+    },
+    [markCctpRecordMinted, readCctpDeliveryStatus],
+  );
+
+  useEffect(() => {
+    if (!isPredepositRedeem || !accountAddress) {
+      return;
+    }
+
+    if (!lineaRecipientInput.trim() || !isLineaRecipientValid) {
+      if (lineaRecipientTouched) {
+        clearStatusLineaRecipientDraft(accountAddress);
+      }
+      return;
+    }
+
+    if (!lineaRecipient) {
+      return;
+    }
+
+    if (lineaRecipient.toLowerCase() === accountAddress.toLowerCase()) {
+      clearStatusLineaRecipientDraft(accountAddress);
+      return;
+    }
+
+    saveStatusLineaRecipientDraft(accountAddress, lineaRecipient);
+  }, [
+    accountAddress,
+    isLineaRecipientValid,
+    isPredepositRedeem,
+    lineaRecipient,
+    lineaRecipientInput,
+    lineaRecipientTouched,
+  ]);
+
+  useEffect(() => {
+    if (!statusTxReviewConfig.active || typeof window === "undefined") {
+      return;
+    }
+
+    const requireStatusExitContext = () => {
+      if (
+        !accountAddress ||
+        !statusPredepositChainNickname ||
+        !predepositRecipient ||
+        !genericUnitTokenAddress ||
+        !stablecoinAddress ||
+        !vaultAddress
+      ) {
+        throw new Error(
+          "Status tx review requires a connected account and selected Status exit context.",
+        );
+      }
+
+      return {
+        accountAddress,
+        chainNickname: statusPredepositChainNickname,
+        genericUnitTokenAddress,
+        stablecoinAddress,
+        vaultAddress,
+      };
+    };
+
+    const buildProgressRecord = ({
+      stage,
+      amount,
+    }: {
+      stage: StatusExitProgressRecord["stage"];
+      amount: bigint;
+    }): StatusExitProgressRecord => {
+      const context = requireStatusExitContext();
+      const now = Date.now();
+
+      return {
+        account: context.accountAddress,
+        stage,
+        ticker: selectedTicker,
+        chainNickname: context.chainNickname,
+        remoteRecipient:
+          statusExitProgress?.remoteRecipient ?? predepositRecipient,
+        genericUnitTokenAddress: context.genericUnitTokenAddress,
+        stablecoinAddress: context.stablecoinAddress,
+        vaultAddress: context.vaultAddress,
+        bridgeRequested: true,
+        bridgeRecipient: lineaRecipient,
+        shares: stage === "gunit" ? amount.toString() : undefined,
+        collateralAmount:
+          stage === "collateral" ? amount.toString() : undefined,
+        createdAt: statusExitProgress?.createdAt ?? now,
+        updatedAt: now,
+      };
+    };
+
+    const getSnapshot = () => ({
+      active: true as const,
+      skips: Array.from(statusTxReviewConfig.skips),
+      account: accountAddress ?? null,
+      route: depositRoute,
+      flow: effectiveFlow,
+      selectedTicker,
+      fromAmount,
+      parsedAmount: parsedAmount?.toString() ?? null,
+      statusPredepositAmount: statusPredepositAmount?.toString() ?? null,
+      statusExitProgress,
+      pendingCctpRecord,
+    });
+
+    const consoleApi = {
+      status: () => {
+        const snapshot = getSnapshot();
+        logStatusTxReviewEvent(statusTxReviewConfig, {
+          step: "status.snapshot",
+          phase: "manual-advance",
+          state: snapshot,
+        });
+        return snapshot;
+      },
+      advanceToGUnits: (input: {
+        shares: bigint | number | string;
+        txHash?: HexData;
+      }) => {
+        const shares = parseStatusTxReviewAmount(input.shares, "shares");
+        const record = buildProgressRecord({ stage: "gunit", amount: shares });
+        setStatusExitProgressRecords((current) =>
+          upsertStatusExitProgressRecord(current, record),
+        );
+        logStatusTxReviewEvent(statusTxReviewConfig, {
+          step: "status.manual.gunits",
+          phase: "manual-advance",
+          txHash: input.txHash,
+          state: { record },
+        });
+        return record;
+      },
+      advanceToCollateral: (input: {
+        amount: bigint | number | string;
+        txHash?: HexData;
+      }) => {
+        const amount = parseStatusTxReviewAmount(input.amount, "amount");
+        const record = buildProgressRecord({ stage: "collateral", amount });
+        setStatusExitProgressRecords((current) =>
+          upsertStatusExitProgressRecord(current, record),
+        );
+        logStatusTxReviewEvent(statusTxReviewConfig, {
+          step: "status.manual.collateral",
+          phase: "manual-advance",
+          txHash: input.txHash,
+          state: { record },
+        });
+        return record;
+      },
+      markBridgeSubmitted: (input: {
+        amount: bigint | number | string;
+        txHash: HexData;
+        recipient?: HexAddress;
+      }) => {
+        const context = requireStatusExitContext();
+        const amount = parseStatusTxReviewAmount(input.amount, "amount");
+        const now = Date.now();
+        const record = {
+          txHash: input.txHash,
+          account: context.accountAddress,
+          amount: amount.toString(),
+          recipient:
+            input.recipient ?? lineaRecipient ?? context.accountAddress,
+          sourceDomain: CCTP_ETHEREUM_DOMAIN,
+          destinationDomain: CCTP_LINEA_DOMAIN,
+          status: "submitted" as const,
+          createdAt: now,
+          updatedAt: now,
+        };
+
+        setCctpBridgeRecords((current) =>
+          upsertCctpBridgeRecord(current, record),
+        );
+        logStatusTxReviewEvent(statusTxReviewConfig, {
+          step: "status.manual.bridgeSubmitted",
+          phase: "manual-advance",
+          txHash: input.txHash,
+          state: { record },
+        });
+        return record;
+      },
+      clear: () => {
+        statusTxReviewDrySubmittedStepsRef.current.clear();
+        statusTxReviewDrySendNonceRef.current = 1;
+        setTxError(null);
+        setTxStep("idle");
+
+        if (accountAddress) {
+          setStatusExitProgressRecords((current) =>
+            clearStatusExitProgressRecord(current, accountAddress),
+          );
+          setCctpBridgeRecords((current) =>
+            current.filter(
+              (record) =>
+                normalizeStoredAddress(record.account) !==
+                accountAddress.toLowerCase(),
+            ),
+          );
+        } else {
+          setStatusExitProgressRecords([]);
+          setCctpBridgeRecords([]);
+        }
+        logStatusTxReviewEvent(statusTxReviewConfig, {
+          step: "status.manual.clear",
+          phase: "manual-advance",
+        });
+      },
+    };
+
+    window.gmTxReview = consoleApi;
+    logStatusTxReviewEvent(statusTxReviewConfig, {
+      step: "status.console.ready",
+      phase: "manual-advance",
+      state: getSnapshot(),
+    });
+
+    return () => {
+      if (window.gmTxReview === consoleApi) {
+        delete window.gmTxReview;
+      }
+    };
+  }, [
+    accountAddress,
+    depositRoute,
+    effectiveFlow,
+    fromAmount,
+    genericUnitTokenAddress,
+    lineaRecipient,
+    parsedAmount,
+    pendingCctpRecord,
+    predepositRecipient,
+    selectedTicker,
+    stablecoinAddress,
+    statusExitProgress,
+    statusPredepositAmount,
+    statusPredepositChainNickname,
+    statusTxReviewConfig,
+    vaultAddress,
+  ]);
+
   const isBridgeToCitreaPending =
     bridgeStakeState === "bridging" ||
     bridgeStakeState === "waiting" ||
@@ -1466,7 +2542,9 @@ export function DepositSwap() {
       if (record.direction !== "citrea-to-l1") {
         return latest;
       }
-      if (record.account.toLowerCase() !== accountAddress.toLowerCase()) {
+      if (
+        normalizeStoredAddress(record.account) !== accountAddress.toLowerCase()
+      ) {
         return latest;
       }
       if (!latest || record.createdAt > latest.createdAt) {
@@ -1684,6 +2762,157 @@ export function DepositSwap() {
 
   useEffect(() => {
     if (
+      !pendingCctpRecord ||
+      pendingCctpRecord.status !== "submitted" ||
+      statusTxReviewHasSkip("attestation")
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const pollAttestation = async () => {
+      if (cctpPollInFlightRef.current) {
+        return;
+      }
+
+      cctpPollInFlightRef.current = true;
+
+      try {
+        const cctpStatus = await fetchCctpStatus({
+          txHash: pendingCctpRecord.txHash,
+          sourceDomain: pendingCctpRecord.sourceDomain,
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        const now = Date.now();
+        setCctpBridgeRecords((current) => {
+          let didChange = false;
+
+          const next = current.map((record): CctpBridgeRecord => {
+            if (
+              record.txHash.toLowerCase() !==
+              pendingCctpRecord.txHash.toLowerCase()
+            ) {
+              return record;
+            }
+
+            if (cctpStatus.phase === "complete") {
+              didChange = true;
+              return {
+                ...record,
+                status: "attested",
+                attestationStatus: cctpStatus.status,
+                message: cctpStatus.message,
+                attestation: cctpStatus.attestation,
+                forwardState: cctpStatus.forwardState,
+                forwardTxHash: cctpStatus.forwardTxHash,
+                updatedAt: now,
+              };
+            }
+
+            if (record.attestationStatus === cctpStatus.status) {
+              return record;
+            }
+
+            didChange = true;
+            return {
+              ...record,
+              attestationStatus: cctpStatus.status,
+              updatedAt: now,
+            };
+          });
+
+          return didChange ? next : current;
+        });
+      } catch (error) {
+        if (ENABLE_LZ_LOGS) {
+          console.warn("CCTP poll: attestation fetch failed", {
+            txHash: pendingCctpRecord.txHash,
+            error,
+          });
+        }
+      } finally {
+        cctpPollInFlightRef.current = false;
+      }
+    };
+
+    void pollAttestation();
+    const interval = window.setInterval(() => {
+      void pollAttestation();
+    }, CCTP_STATUS_POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [pendingCctpRecord, statusTxReviewHasSkip]);
+
+  useEffect(() => {
+    if (
+      !pendingCctpRecord ||
+      pendingCctpRecord.status !== "attested" ||
+      !pendingCctpRecord.message
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const pollDelivery = async () => {
+      if (cctpDeliveryPollInFlightRef.current) {
+        return;
+      }
+
+      cctpDeliveryPollInFlightRef.current = true;
+
+      try {
+        const delivery = await readCctpDeliveryStatus(pendingCctpRecord);
+        if (!delivery || cancelled) {
+          return;
+        }
+
+        markCctpRecordMinted(pendingCctpRecord, {
+          source: delivery.source,
+          mintTxHash: delivery.mintTxHash,
+          notify: true,
+        });
+
+        if (ENABLE_LZ_LOGS) {
+          console.info("CCTP poll: delivery detected", {
+            txHash: pendingCctpRecord.txHash,
+          });
+        }
+      } catch (error) {
+        if (ENABLE_LZ_LOGS) {
+          console.warn("CCTP poll: delivery check failed", {
+            txHash: pendingCctpRecord.txHash,
+            error,
+          });
+        }
+      } finally {
+        cctpDeliveryPollInFlightRef.current = false;
+      }
+    };
+
+    void pollDelivery();
+    const interval = window.setInterval(() => {
+      if (!cancelled) {
+        void pollDelivery();
+      }
+    }, CCTP_STATUS_POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [markCctpRecordMinted, pendingCctpRecord, readCctpDeliveryStatus]);
+
+  useEffect(() => {
+    if (
       bridgeStakeState !== "waiting" ||
       !autoStakeFlow?.active ||
       stakeBalanceValue === undefined
@@ -1776,11 +3005,18 @@ export function DepositSwap() {
       : isBridgeAndStakeFlow
         ? "Bridge & Stake"
         : "Mint";
-  const redeemActionLabel = isCitreaReturnFlow
-    ? isOnMainnet
-      ? "Redeem"
-      : "Bridge"
-    : "Redeem";
+  const statusResumeActionLabel = isStatusExitCollateralResume
+    ? "Continue Bridge"
+    : isStatusExitGunitResume
+      ? "Continue Redeem & Bridge"
+      : null;
+  const redeemActionLabel = isPredepositRedeem
+    ? (statusResumeActionLabel ?? "Withdraw, Redeem & Bridge")
+    : isCitreaReturnFlow
+      ? isOnMainnet
+        ? "Redeem"
+        : "Bridge"
+      : "Redeem";
 
   const buttonState = useMemo(() => {
     const actionLabel = isDepositFlow ? depositButtonLabel : redeemActionLabel;
@@ -1793,8 +3029,27 @@ export function DepositSwap() {
       return { label: "Connect wallet", disabled: true };
     }
 
-    if (isPredepositRedeem) {
-      return { label: "Locked", disabled: true };
+    if (isPredepositRedeem && pendingCctpRecord) {
+      if (txStep === "submitting") {
+        return { label: "Finalizing USDC…", disabled: true };
+      }
+
+      if (
+        pendingCctpRecord.status === "submitted" &&
+        !statusTxReviewHasSkip("attestation")
+      ) {
+        return { label: "Waiting for Circle attestation…", disabled: true };
+      }
+
+      if (activeChainId !== LINEA_CHAIN_ID) {
+        return { label: `Switch to ${LINEA_CHAIN_LABEL}`, disabled: false };
+      }
+
+      if (isPendingCctpRecipientMismatch) {
+        return { label: "Switch to recipient wallet", disabled: false };
+      }
+
+      return { label: "Finalize USDC on Linea", disabled: hasNoLineaClaimGas };
     }
 
     if (isCitreaReturnFlow && isOnMainnet && !citreaReturnReadyForRedeem) {
@@ -1809,6 +3064,60 @@ export function DepositSwap() {
 
     if (isDepositFlow && isCitreaDeposit && isAutoStakeFlowInProgress) {
       return { label: "Bridge in progress…", disabled: true };
+    }
+
+    if (isPredepositRedeem) {
+      if (statusExitProgress && !isStatusExitProgressSelectionReady) {
+        return { label: "Preparing recovery…", disabled: true };
+      }
+
+      if (isStatusExitGunitResume) {
+        if (
+          statusExitProgressShares == null ||
+          statusExitProgressShares <= ZERO_AMOUNT
+        ) {
+          return { label: "Stored GUnits unavailable", disabled: true };
+        }
+      } else if (isStatusExitCollateralResume) {
+        if (
+          statusExitProgressCollateralAmount == null ||
+          statusExitProgressCollateralAmount <= ZERO_AMOUNT
+        ) {
+          return { label: "Collateral unavailable", disabled: true };
+        }
+      } else if (
+        isStatusPredepositLoading &&
+        !statusTxReviewHasSkip("predeposit")
+      ) {
+        return { label: "Checking predeposit…", disabled: true };
+      } else if (
+        (isStatusPredepositError || statusPredepositAmount == null) &&
+        !statusTxReviewHasSkip("predeposit")
+      ) {
+        return { label: "Predeposit unavailable", disabled: true };
+      } else if (
+        statusPredepositAmount != null &&
+        statusPredepositAmount <= ZERO_AMOUNT &&
+        !statusTxReviewHasSkip("predeposit")
+      ) {
+        if (pendingLineaNativeBridgeRecord) {
+          return { label: "USDT bridge pending claim", disabled: true };
+        }
+
+        return { label: "No Status predeposit", disabled: true };
+      }
+
+      if (!isLineaRecipientValid) {
+        return { label: "Invalid Linea recipient", disabled: true };
+      }
+
+      if (!lineaRecipientConfirmed) {
+        return { label: "Confirm Linea recipient", disabled: true };
+      }
+
+      if (!lineaRecipient) {
+        return { label: "Linea recipient unavailable", disabled: true };
+      }
     }
 
     if (shouldSwitchChain) {
@@ -1841,11 +3150,11 @@ export function DepositSwap() {
         }
       }
     } else {
-      if (!isPredepositRedeem && selectableStablecoins.length === 0) {
+      if (selectableStablecoins.length === 0) {
         return { label: "No redeem asset available", disabled: true };
       }
 
-      if (!isGunitRedeem && !gusdAddress) {
+      if (!isGunitRedeem && !isPredepositRedeem && !gusdAddress) {
         return { label: "GUSD unavailable", disabled: true };
       }
 
@@ -1864,7 +3173,7 @@ export function DepositSwap() {
       return { label: "Enter amount", disabled: true };
     }
 
-    if (insufficientBalance) {
+    if (insufficientBalance && !statusTxReviewHasSkip("balance")) {
       return { label: "Insufficient balance", disabled: true };
     }
 
@@ -1910,6 +3219,7 @@ export function DepositSwap() {
     return { label: actionLabel, disabled: false };
   }, [
     accountAddress,
+    activeChainId,
     citreaReturnFinal,
     citreaReturnPending,
     citreaReturnReadyForRedeem,
@@ -1923,14 +3233,26 @@ export function DepositSwap() {
     isDepositFlow,
     isAutoStakeFlowInProgress,
     isGunitRedeem,
+    isPendingCctpRecipientMismatch,
+    hasNoLineaClaimGas,
+    lineaRecipientConfirmed,
+    isLineaRecipientValid,
     isOnMainnet,
     isNonMainnetDeposit,
     isPredepositRedeem,
     isRedeemQuotePending,
     isRedeemQuoteUnavailable,
+    isStatusExitCollateralResume,
+    isStatusExitGunitResume,
+    isStatusExitProgressSelectionReady,
     isStatusDepositsPaused,
+    isStatusPredepositError,
+    isStatusPredepositLoading,
+    lineaRecipient,
     selectableStablecoins.length,
     needsApproval,
+    pendingCctpRecord,
+    pendingLineaNativeBridgeRecord,
     parsedAmount,
     redeemLiquidityState.phase,
     redeemActionLabel,
@@ -1940,6 +3262,11 @@ export function DepositSwap() {
     shouldUseVaultPreview,
     shouldSwitchChain,
     stablecoinAddress,
+    statusExitProgress,
+    statusExitProgressCollateralAmount,
+    statusExitProgressShares,
+    statusPredepositAmount,
+    statusTxReviewHasSkip,
     switchChainAsync,
     txStep,
     vaultAddress,
@@ -2204,6 +3531,117 @@ export function DepositSwap() {
     ],
   );
 
+  const logReviewedStatusWrite = useCallback(
+    (
+      step: string,
+      request: StatusTxReviewRequest,
+      state?: Record<string, unknown>,
+    ) => {
+      logStatusTxReviewEvent(statusTxReviewConfig, {
+        step,
+        phase: "before-write",
+        request,
+        state: {
+          selectedTicker,
+          account: accountAddress,
+          skips: Array.from(statusTxReviewConfig.skips),
+          ...state,
+        },
+      });
+    },
+    [accountAddress, selectedTicker, statusTxReviewConfig],
+  );
+
+  const logReviewedStatusSubmission = useCallback(
+    (step: string, txHash: HexBytes) => {
+      logStatusTxReviewEvent(statusTxReviewConfig, {
+        step,
+        phase: "submitted",
+        txHash,
+      });
+    },
+    [statusTxReviewConfig],
+  );
+
+  const waitForReviewedStatusReceipt = useCallback(
+    async ({
+      hash,
+      label,
+      step,
+      chainId,
+    }: {
+      hash: HexBytes;
+      label: string;
+      step: string;
+      chainId?: number;
+    }) => {
+      const skipReason = statusTxReviewHasSkip("send")
+        ? "gmSkip=send"
+        : statusTxReviewHasSkip("receipt")
+          ? "gmSkip=receipt"
+          : null;
+
+      if (skipReason) {
+        logStatusTxReviewEvent(statusTxReviewConfig, {
+          step,
+          phase: "skipped",
+          txHash: hash,
+          reason: skipReason,
+        });
+        return false;
+      }
+
+      await waitForFollowUpTransactionReceipt(publicClient, hash);
+      notifyTxConfirmed(label, hash, undefined, chainId);
+      logStatusTxReviewEvent(statusTxReviewConfig, {
+        step,
+        phase: "confirmed",
+        txHash: hash,
+      });
+      return true;
+    },
+    [publicClient, statusTxReviewConfig, statusTxReviewHasSkip],
+  );
+
+  const submitReviewedStatusWrite = useCallback(
+    async (
+      step: string,
+      request: StatusTxReviewRequest,
+      submit: () => Promise<HexBytes>,
+      state?: Record<string, unknown>,
+    ) => {
+      logReviewedStatusWrite(step, request, state);
+
+      if (statusTxReviewHasSkip("send")) {
+        const nonce = statusTxReviewDrySendNonceRef.current;
+        statusTxReviewDrySendNonceRef.current += 1;
+        const txHash = `0x${nonce.toString(16).padStart(64, "0")}` as HexBytes;
+        statusTxReviewDrySubmittedStepsRef.current.add(step);
+
+        logStatusTxReviewEvent(statusTxReviewConfig, {
+          step,
+          phase: "dry-submit",
+          request,
+          txHash,
+          reason: "gmSkip=send",
+          state,
+        });
+
+        return null;
+      }
+
+      const txHash = await submit();
+      logReviewedStatusSubmission(step, txHash);
+      return txHash;
+    },
+    [
+      logReviewedStatusSubmission,
+      logReviewedStatusWrite,
+      statusTxReviewConfig,
+      statusTxReviewHasSkip,
+    ],
+  );
+
   const handleDeposit = async () => {
     if (
       !accountAddress ||
@@ -2253,7 +3691,7 @@ export function DepositSwap() {
           args: [depositorAddress, parsedAmount],
         });
         notifyTxSubmitted("Approval", approvalHash);
-        await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+        await waitForFollowUpTransactionReceipt(publicClient, approvalHash);
         notifyTxConfirmed("Approval", approvalHash);
         await refetchDepositAllowance?.();
       }
@@ -2426,7 +3864,7 @@ export function DepositSwap() {
         });
       }
       notifyTxSubmitted(depositActionLabel, depositHash, toastMessage);
-      await publicClient.waitForTransactionReceipt({ hash: depositHash });
+      await waitForFollowUpTransactionReceipt(publicClient, depositHash);
       notifyTxConfirmed(depositActionLabel, depositHash, toastMessage);
       if (isCitreaDeposit && stakeAfterBridge) {
         // TODO: replace balance polling with LayerZero message status tracking.
@@ -2514,7 +3952,7 @@ export function DepositSwap() {
           args: [BRIDGE_COORDINATOR_L2_ADDRESS, parsedAmount],
         });
         notifyTxSubmitted("Approval", approvalHash);
-        await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+        await waitForFollowUpTransactionReceipt(publicClient, approvalHash);
         notifyTxConfirmed("Approval", approvalHash);
         await refetchCitreaAllowance?.();
       }
@@ -2596,7 +4034,7 @@ export function DepositSwap() {
       );
       const toastMessage = buildLayerZeroMessage(bridgeHash);
       notifyTxSubmitted("Bridge", bridgeHash, toastMessage);
-      await publicClient.waitForTransactionReceipt({ hash: bridgeHash });
+      await waitForFollowUpTransactionReceipt(publicClient, bridgeHash);
       notifyTxConfirmed("Bridge", bridgeHash, toastMessage);
 
       setFromAmount("");
@@ -2658,7 +4096,7 @@ export function DepositSwap() {
             args: [CITREA_VAULT_ADDRESS, targetAmount],
           });
           notifyTxSubmitted("Stake approval", approvalHash);
-          await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+          await waitForFollowUpTransactionReceipt(publicClient, approvalHash);
           notifyTxConfirmed("Stake approval", approvalHash);
           await refetchStakeAllowance?.();
         }
@@ -2677,7 +4115,7 @@ export function DepositSwap() {
           args: [targetAmount, accountAddress],
         });
         notifyTxSubmitted("Stake", stakeHash);
-        await publicClient.waitForTransactionReceipt({ hash: stakeHash });
+        await waitForFollowUpTransactionReceipt(publicClient, stakeHash);
         notifyTxConfirmed("Stake", stakeHash);
 
         setBridgeStakeState("idle");
@@ -2819,7 +4257,7 @@ export function DepositSwap() {
           args: [accountAddress, accountAddress, parsedAmount],
         });
         notifyTxSubmitted("Unwrap", unwrapHash);
-        await publicClient.waitForTransactionReceipt({ hash: unwrapHash });
+        await waitForFollowUpTransactionReceipt(publicClient, unwrapHash);
         notifyTxConfirmed("Unwrap", unwrapHash);
 
         const balanceAfter = await publicClient.readContract({
@@ -2887,7 +4325,7 @@ export function DepositSwap() {
           args: [vaultAddress, redeemShares],
         });
         notifyTxSubmitted("Approval", approvalHash);
-        await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+        await waitForFollowUpTransactionReceipt(publicClient, approvalHash);
         notifyTxConfirmed("Approval", approvalHash);
         await refetchRedeemAllowance?.();
       }
@@ -2916,7 +4354,7 @@ export function DepositSwap() {
         args: [redeemShares, accountAddress, accountAddress],
       });
       notifyTxSubmitted("Redeem", redeemHash);
-      await publicClient.waitForTransactionReceipt({ hash: redeemHash });
+      await waitForFollowUpTransactionReceipt(publicClient, redeemHash);
       notifyTxConfirmed("Redeem", redeemHash);
 
       setFromAmount("");
@@ -2936,6 +4374,871 @@ export function DepositSwap() {
     }
   };
 
+  const handleClaimCctpOnLinea = async () => {
+    if (!pendingCctpRecord || !accountAddress) {
+      return;
+    }
+
+    if (!pendingCctpAttestationReady) {
+      return;
+    }
+
+    const alreadyDelivered = await checkCctpDelivery(pendingCctpRecord);
+    if (alreadyDelivered) {
+      return;
+    }
+
+    if (activeChainId !== LINEA_CHAIN_ID) {
+      if (switchChainAsync) {
+        await switchChainAsync({ chainId: LINEA_CHAIN_ID });
+      }
+      return;
+    }
+
+    if (hasNoLineaClaimGas) {
+      const message = "Add ETH on Linea to pay gas before manual finalization.";
+      setTxError(message);
+      pushAlert({
+        type: "warning",
+        title: "Linea gas required",
+        message,
+      });
+      return;
+    }
+
+    const cctpMessage =
+      pendingCctpRecord.message ??
+      (statusTxReviewHasSkip("attestation") ? ZERO_BYTES32 : undefined);
+    const cctpAttestation =
+      pendingCctpRecord.attestation ??
+      (statusTxReviewHasSkip("attestation") ? ZERO_BYTES32 : undefined);
+
+    if (!publicClient || !cctpMessage || !cctpAttestation) {
+      return;
+    }
+
+    setTxError(null);
+    setTxStep("submitting");
+
+    try {
+      const receiveArgs = [cctpMessage, cctpAttestation] as const;
+      console.info("CCTP finalization call", {
+        functionName: "receiveMessage",
+        address: CCTP_MESSAGE_TRANSMITTER_V2_ADDRESS,
+        chainId: LINEA_CHAIN_ID,
+        txHash: pendingCctpRecord.txHash,
+      });
+      const receiveRequest = {
+        address: CCTP_MESSAGE_TRANSMITTER_V2_ADDRESS,
+        chainId: LINEA_CHAIN_ID,
+        functionName: "receiveMessage",
+        args: receiveArgs,
+      } as const satisfies StatusTxReviewRequest;
+      const claimHash = await submitReviewedStatusWrite(
+        "status.cctp.claim",
+        receiveRequest,
+        () =>
+          writeContractAsync({
+            abi: cctpMessageTransmitterV2Abi,
+            address: CCTP_MESSAGE_TRANSMITTER_V2_ADDRESS,
+            chainId: LINEA_CHAIN_ID,
+            functionName: "receiveMessage",
+            args: receiveArgs,
+          }),
+        { sourceTxHash: pendingCctpRecord.txHash },
+      );
+      if (!claimHash) {
+        return;
+      }
+      notifyTxSubmitted(
+        "Linea finalization",
+        claimHash,
+        undefined,
+        LINEA_CHAIN_ID,
+      );
+      await waitForReviewedStatusReceipt({
+        hash: claimHash,
+        label: "Linea finalization",
+        step: "status.cctp.claim",
+        chainId: LINEA_CHAIN_ID,
+      });
+
+      setCctpBridgeRecords((current) =>
+        current.map((record) =>
+          record.txHash.toLowerCase() === pendingCctpRecord.txHash.toLowerCase()
+            ? {
+                ...record,
+                status: "minted",
+                completionSource: "manual",
+                mintTxHash: claimHash,
+                updatedAt: Date.now(),
+                finalizedAt: Date.now(),
+              }
+            : record,
+        ),
+      );
+    } catch (error) {
+      if (
+        isCctpAlreadyDeliveredError(error) ||
+        (await checkCctpDelivery(pendingCctpRecord))
+      ) {
+        markCctpRecordMinted(pendingCctpRecord, {
+          source: pendingCctpRecord.forwardTxHash ? "forwarded" : "automatic",
+          mintTxHash: pendingCctpRecord.forwardTxHash,
+          notify: true,
+        });
+        return;
+      }
+
+      const message = getCctpClaimErrorMessage(error);
+      setTxError(message);
+      pushAlert({
+        type: "error",
+        title: "Linea claim failed",
+        message,
+      });
+    } finally {
+      setTxStep("idle");
+    }
+  };
+
+  const handleOpenRecipientWalletPrompt = () => {
+    setTxError(null);
+    void modal?.open({ view: "Account" });
+  };
+
+  const handleStatusExit = async () => {
+    const progress = statusExitProgress;
+    const exitTicker = progress?.ticker ?? selectedTicker;
+    const exitVaultAddress = progress?.vaultAddress ?? vaultAddress;
+    const exitGenericUnitTokenAddress =
+      progress?.genericUnitTokenAddress ?? genericUnitTokenAddress;
+    const exitStablecoinAddress =
+      progress?.stablecoinAddress ?? stablecoinAddress;
+    const exitBridgeRequested = true;
+    const recipient = lineaRecipient;
+    const shouldRequireLineaRecipientConfirmation = exitBridgeRequested;
+    const progressCreatedAt = progress?.createdAt ?? Date.now();
+
+    if (
+      !accountAddress ||
+      !exitVaultAddress ||
+      !exitGenericUnitTokenAddress ||
+      !exitStablecoinAddress ||
+      !statusPredepositChainNickname ||
+      !publicClient
+    ) {
+      return;
+    }
+
+    if (!isStatusExitProgressSelectionReady) {
+      return;
+    }
+
+    if (
+      shouldRequireLineaRecipientConfirmation &&
+      (!isLineaRecipientValid || !lineaRecipientConfirmed)
+    ) {
+      return;
+    }
+
+    if (exitBridgeRequested && !recipient) {
+      return;
+    }
+
+    if (!progress) {
+      if (
+        !statusTxReviewHasSkip("predeposit") &&
+        (statusPredepositAmount == null ||
+          statusPredepositAmount <= ZERO_AMOUNT)
+      ) {
+        return;
+      }
+    }
+
+    if (
+      progress?.stage === "gunit" &&
+      (statusExitProgressShares == null ||
+        statusExitProgressShares <= ZERO_AMOUNT)
+    ) {
+      return;
+    }
+
+    if (
+      progress?.stage === "collateral" &&
+      (statusExitProgressCollateralAmount == null ||
+        statusExitProgressCollateralAmount <= ZERO_AMOUNT)
+    ) {
+      return;
+    }
+
+    const statusClient = mainnetClient ?? publicClient;
+    const writeProgress = (
+      record: Omit<
+        StatusExitProgressRecord,
+        "account" | "createdAt" | "updatedAt"
+      >,
+    ) => {
+      const now = Date.now();
+      setStatusExitProgressRecords((current) =>
+        upsertStatusExitProgressRecord(current, {
+          ...record,
+          account: accountAddress,
+          createdAt: progressCreatedAt,
+          updatedAt: now,
+        }),
+      );
+    };
+    const clearProgress = () => {
+      setStatusExitProgressRecords((current) =>
+        clearStatusExitProgressRecord(current, accountAddress),
+      );
+    };
+    const writeGunitProgress = (shares: bigint) => {
+      writeProgress({
+        stage: "gunit",
+        ticker: exitTicker,
+        chainNickname: statusPredepositChainNickname,
+        remoteRecipient: progress?.remoteRecipient ?? predepositRecipient,
+        genericUnitTokenAddress: exitGenericUnitTokenAddress,
+        stablecoinAddress: exitStablecoinAddress,
+        vaultAddress: exitVaultAddress,
+        bridgeRequested: exitBridgeRequested,
+        bridgeRecipient: exitBridgeRequested ? recipient : undefined,
+        shares: shares.toString(),
+      });
+    };
+    const writeCollateralProgress = (amount: bigint) => {
+      writeProgress({
+        stage: "collateral",
+        ticker: exitTicker,
+        chainNickname: statusPredepositChainNickname,
+        remoteRecipient: progress?.remoteRecipient ?? predepositRecipient,
+        genericUnitTokenAddress: exitGenericUnitTokenAddress,
+        stablecoinAddress: exitStablecoinAddress,
+        vaultAddress: exitVaultAddress,
+        bridgeRequested: exitBridgeRequested,
+        bridgeRecipient: exitBridgeRequested ? recipient : undefined,
+        collateralAmount: amount.toString(),
+      });
+    };
+    const refetchStatusExitBalances = async () => {
+      redeemVaultLiquidity.refresh();
+      const refetches: Promise<unknown>[] = [];
+      if (refetchStatusPredeposit) {
+        refetches.push(refetchStatusPredeposit());
+      }
+      if (stablecoinBalance.refetch) {
+        refetches.push(stablecoinBalance.refetch());
+      }
+      if (genericUnitBalance.refetch) {
+        refetches.push(genericUnitBalance.refetch());
+      }
+      if (refetches.length) {
+        await Promise.allSettled(refetches);
+      }
+    };
+
+    setTxError(null);
+    setPostMintHref(null);
+
+    try {
+      let redeemShares =
+        progress?.stage === "gunit" ? statusExitProgressShares : null;
+      let redeemedAmount =
+        progress?.stage === "collateral"
+          ? statusExitProgressCollateralAmount
+          : null;
+
+      if (!progress) {
+        if (
+          statusTxReviewHasSkip("predeposit") &&
+          (statusPredepositAmount == null ||
+            statusPredepositAmount <= ZERO_AMOUNT)
+        ) {
+          logStatusTxReviewEvent(statusTxReviewConfig, {
+            step: "status.predeposit",
+            phase: "skipped",
+            reason: "gmSkip=predeposit",
+            state: { parsedAmount },
+          });
+        }
+
+        const unitBalanceBefore = await statusClient.readContract({
+          abi: erc20Abi,
+          address: exitGenericUnitTokenAddress,
+          functionName: "balanceOf",
+          args: [accountAddress],
+        });
+
+        const withdrawArgs = [
+          statusPredepositChainNickname,
+          predepositRecipient,
+          accountAddress,
+          ZERO_ADDRESS,
+        ] as const;
+        setTxStep("submitting");
+        console.info("Status predeposit withdrawal call", {
+          functionName: "withdrawPredeposit",
+          address: BRIDGE_COORDINATOR_L1_ADDRESS,
+          chainId: MAINNET_CHAIN_ID,
+          args: withdrawArgs,
+        });
+        const withdrawRequest = {
+          address: BRIDGE_COORDINATOR_L1_ADDRESS,
+          chainId: MAINNET_CHAIN_ID,
+          functionName: "withdrawPredeposit",
+          args: withdrawArgs,
+        } as const satisfies StatusTxReviewRequest;
+        const withdrawHash = await submitReviewedStatusWrite(
+          "status.withdrawPredeposit",
+          withdrawRequest,
+          () =>
+            writeContractAsync({
+              abi: bridgeCoordinatorPredepositAbi,
+              address: BRIDGE_COORDINATOR_L1_ADDRESS,
+              chainId: MAINNET_CHAIN_ID,
+              functionName: "withdrawPredeposit",
+              args: withdrawArgs,
+            }),
+          { predepositAmount: statusPredepositAmount },
+        );
+        if (!withdrawHash) {
+          return;
+        }
+        notifyTxSubmitted(
+          "Status withdrawal",
+          withdrawHash,
+          undefined,
+          MAINNET_CHAIN_ID,
+        );
+        await waitForReviewedStatusReceipt({
+          hash: withdrawHash,
+          label: "Status withdrawal",
+          step: "status.withdrawPredeposit",
+          chainId: MAINNET_CHAIN_ID,
+        });
+
+        const unitBalanceAfter = await statusClient.readContract({
+          abi: erc20Abi,
+          address: exitGenericUnitTokenAddress,
+          functionName: "balanceOf",
+          args: [accountAddress],
+        });
+        redeemShares = unitBalanceAfter - unitBalanceBefore;
+        if (redeemShares <= ZERO_AMOUNT && statusTxReviewHasSkip("balance")) {
+          redeemShares =
+            statusPredepositAmount && statusPredepositAmount > ZERO_AMOUNT
+              ? statusPredepositAmount
+              : (parsedAmount ?? ZERO_AMOUNT);
+          logStatusTxReviewEvent(statusTxReviewConfig, {
+            step: "status.withdrawPredeposit.balance",
+            phase: "skipped",
+            reason: "gmSkip=balance",
+            state: { redeemShares },
+          });
+        }
+
+        if (redeemShares <= ZERO_AMOUNT) {
+          setTxError("No GenericUnit tokens were withdrawn.");
+          pushAlert({
+            type: "warning",
+            title: "Withdrawal unavailable",
+            message: "No GenericUnit tokens were withdrawn.",
+          });
+          return;
+        }
+
+        writeGunitProgress(redeemShares);
+      }
+
+      if (redeemedAmount == null) {
+        if (redeemShares == null || redeemShares <= ZERO_AMOUNT) {
+          setTxError("No GenericUnit tokens are available to redeem.");
+          pushAlert({
+            type: "warning",
+            title: "Redeem unavailable",
+            message: "No GenericUnit tokens are available to redeem.",
+          });
+          return;
+        }
+
+        const hasLiquidityBeforeApproval = statusTxReviewHasSkip("liquidity")
+          ? true
+          : await ensureRedeemVaultLiquidity({
+              redeemShares,
+            });
+
+        if (statusTxReviewHasSkip("liquidity")) {
+          logStatusTxReviewEvent(statusTxReviewConfig, {
+            step: "status.redeem.liquidityBeforeApproval",
+            phase: "skipped",
+            reason: "gmSkip=liquidity",
+            state: { redeemShares },
+          });
+        }
+
+        if (!hasLiquidityBeforeApproval) {
+          return;
+        }
+
+        const redeemApprovalDryReviewed =
+          statusTxReviewHasSkip("send") &&
+          statusTxReviewDrySubmittedStepsRef.current.has(
+            "status.redeem.approve",
+          );
+        const currentAllowance =
+          statusTxReviewHasSkip("allowance") || redeemApprovalDryReviewed
+            ? redeemShares
+            : await statusClient.readContract({
+                abi: erc20Abi,
+                address: exitGenericUnitTokenAddress,
+                functionName: "allowance",
+                args: [accountAddress, exitVaultAddress],
+              });
+
+        if (statusTxReviewHasSkip("allowance") || redeemApprovalDryReviewed) {
+          logStatusTxReviewEvent(statusTxReviewConfig, {
+            step: "status.redeem.allowance",
+            phase: "skipped",
+            reason: statusTxReviewHasSkip("allowance")
+              ? "gmSkip=allowance"
+              : "gmSkip=send reviewed status.redeem.approve",
+            state: { currentAllowance, redeemShares },
+          });
+        }
+
+        if (currentAllowance < redeemShares) {
+          const approvalArgs = [exitVaultAddress, redeemShares] as const;
+          setTxStep("approving");
+          console.info("Status redeem approval call", {
+            functionName: "approve",
+            address: exitGenericUnitTokenAddress,
+            chainId: MAINNET_CHAIN_ID,
+            args: approvalArgs,
+          });
+          const approvalRequest = {
+            address: exitGenericUnitTokenAddress,
+            chainId: MAINNET_CHAIN_ID,
+            functionName: "approve",
+            args: approvalArgs,
+          } as const satisfies StatusTxReviewRequest;
+          const approvalHash = await submitReviewedStatusWrite(
+            "status.redeem.approve",
+            approvalRequest,
+            () =>
+              writeContractAsync({
+                abi: erc20Abi,
+                address: exitGenericUnitTokenAddress,
+                chainId: MAINNET_CHAIN_ID,
+                functionName: "approve",
+                args: approvalArgs,
+              }),
+          );
+          if (!approvalHash) {
+            return;
+          }
+          notifyTxSubmitted(
+            "Approval",
+            approvalHash,
+            undefined,
+            MAINNET_CHAIN_ID,
+          );
+          await waitForReviewedStatusReceipt({
+            hash: approvalHash,
+            label: "Approval",
+            step: "status.redeem.approve",
+            chainId: MAINNET_CHAIN_ID,
+          });
+          await refetchRedeemAllowance?.();
+        }
+
+        const hasLiquidityBeforeRedeem = statusTxReviewHasSkip("liquidity")
+          ? true
+          : await ensureRedeemVaultLiquidity({
+              redeemShares,
+            });
+
+        if (statusTxReviewHasSkip("liquidity")) {
+          logStatusTxReviewEvent(statusTxReviewConfig, {
+            step: "status.redeem.liquidityBeforeRedeem",
+            phase: "skipped",
+            reason: "gmSkip=liquidity",
+            state: { redeemShares },
+          });
+        }
+
+        if (!hasLiquidityBeforeRedeem) {
+          return;
+        }
+
+        const stablecoinBalanceBefore = await statusClient.readContract({
+          abi: erc20Abi,
+          address: exitStablecoinAddress,
+          functionName: "balanceOf",
+          args: [accountAddress],
+        });
+
+        const redeemArgs = [
+          redeemShares,
+          accountAddress,
+          accountAddress,
+        ] as const;
+        setTxStep("submitting");
+        console.info("Status redeem call", {
+          functionName: "redeem",
+          address: exitVaultAddress,
+          chainId: MAINNET_CHAIN_ID,
+          args: redeemArgs,
+        });
+        const redeemRequest = {
+          address: exitVaultAddress,
+          chainId: MAINNET_CHAIN_ID,
+          functionName: "redeem",
+          args: redeemArgs,
+        } as const satisfies StatusTxReviewRequest;
+        const redeemHash = await submitReviewedStatusWrite(
+          "status.redeem",
+          redeemRequest,
+          () =>
+            writeContractAsync({
+              abi: erc4626Abi,
+              address: exitVaultAddress,
+              chainId: MAINNET_CHAIN_ID,
+              functionName: "redeem",
+              args: redeemArgs,
+            }),
+        );
+        if (!redeemHash) {
+          return;
+        }
+        notifyTxSubmitted("Redeem", redeemHash, undefined, MAINNET_CHAIN_ID);
+        await waitForReviewedStatusReceipt({
+          hash: redeemHash,
+          label: "Redeem",
+          step: "status.redeem",
+          chainId: MAINNET_CHAIN_ID,
+        });
+
+        const stablecoinBalanceAfter = await statusClient.readContract({
+          abi: erc20Abi,
+          address: exitStablecoinAddress,
+          functionName: "balanceOf",
+          args: [accountAddress],
+        });
+        redeemedAmount = stablecoinBalanceAfter - stablecoinBalanceBefore;
+        if (redeemedAmount <= ZERO_AMOUNT && statusTxReviewHasSkip("balance")) {
+          redeemedAmount = previewToAmountRaw ?? redeemShares;
+          logStatusTxReviewEvent(statusTxReviewConfig, {
+            step: "status.redeem.balance",
+            phase: "skipped",
+            reason: "gmSkip=balance",
+            state: { redeemedAmount },
+          });
+        }
+
+        if (redeemedAmount <= ZERO_AMOUNT) {
+          setTxError(`No ${exitTicker} was redeemed.`);
+          pushAlert({
+            type: "warning",
+            title: "Redeem unavailable",
+            message: `No ${exitTicker} was redeemed.`,
+          });
+          return;
+        }
+
+        if (!exitBridgeRequested) {
+          clearProgress();
+          setFromAmount("");
+          await refetchStatusExitBalances();
+          return;
+        }
+
+        writeCollateralProgress(redeemedAmount);
+      }
+
+      if (!exitBridgeRequested) {
+        clearProgress();
+        setFromAmount("");
+        await refetchStatusExitBalances();
+        return;
+      }
+
+      if (
+        !recipient ||
+        redeemedAmount == null ||
+        redeemedAmount <= ZERO_AMOUNT
+      ) {
+        return;
+      }
+
+      const bridgeBalance = statusTxReviewHasSkip("balance")
+        ? redeemedAmount
+        : await statusClient.readContract({
+            abi: erc20Abi,
+            address: exitStablecoinAddress,
+            functionName: "balanceOf",
+            args: [accountAddress],
+          });
+
+      if (statusTxReviewHasSkip("balance")) {
+        logStatusTxReviewEvent(statusTxReviewConfig, {
+          step: "status.bridge.balance",
+          phase: "skipped",
+          reason: "gmSkip=balance",
+          state: { bridgeBalance, redeemedAmount },
+        });
+      }
+
+      if (bridgeBalance < redeemedAmount) {
+        setTxError(`Insufficient ${exitTicker} balance to continue bridge.`);
+        pushAlert({
+          type: "warning",
+          title: "Bridge unavailable",
+          message: `Your ${exitTicker} balance is lower than the stored bridge amount.`,
+        });
+        return;
+      }
+
+      if (exitTicker === "USDC") {
+        const bridgeApprovalDryReviewed =
+          statusTxReviewHasSkip("send") &&
+          statusTxReviewDrySubmittedStepsRef.current.has("status.cctp.approve");
+        const bridgeAllowance =
+          statusTxReviewHasSkip("allowance") || bridgeApprovalDryReviewed
+            ? redeemedAmount
+            : await statusClient.readContract({
+                abi: erc20Abi,
+                address: exitStablecoinAddress,
+                functionName: "allowance",
+                args: [accountAddress, CCTP_TOKEN_MESSENGER_V2_ADDRESS],
+              });
+
+        if (statusTxReviewHasSkip("allowance") || bridgeApprovalDryReviewed) {
+          logStatusTxReviewEvent(statusTxReviewConfig, {
+            step: "status.cctp.allowance",
+            phase: "skipped",
+            reason: statusTxReviewHasSkip("allowance")
+              ? "gmSkip=allowance"
+              : "gmSkip=send reviewed status.cctp.approve",
+            state: { bridgeAllowance, redeemedAmount },
+          });
+        }
+
+        if (bridgeAllowance < redeemedAmount) {
+          const bridgeApprovalArgs = [
+            CCTP_TOKEN_MESSENGER_V2_ADDRESS,
+            redeemedAmount,
+          ] as const;
+          setTxStep("approving");
+          console.info("CCTP USDC approval call", {
+            functionName: "approve",
+            address: exitStablecoinAddress,
+            chainId: MAINNET_CHAIN_ID,
+            args: bridgeApprovalArgs,
+          });
+          const bridgeApprovalRequest = {
+            address: exitStablecoinAddress,
+            chainId: MAINNET_CHAIN_ID,
+            functionName: "approve",
+            args: bridgeApprovalArgs,
+          } as const satisfies StatusTxReviewRequest;
+          const approvalHash = await submitReviewedStatusWrite(
+            "status.cctp.approve",
+            bridgeApprovalRequest,
+            () =>
+              writeContractAsync({
+                abi: erc20Abi,
+                address: exitStablecoinAddress,
+                chainId: MAINNET_CHAIN_ID,
+                functionName: "approve",
+                args: bridgeApprovalArgs,
+              }),
+          );
+          if (!approvalHash) {
+            return;
+          }
+          notifyTxSubmitted(
+            "Bridge approval",
+            approvalHash,
+            undefined,
+            MAINNET_CHAIN_ID,
+          );
+          await waitForReviewedStatusReceipt({
+            hash: approvalHash,
+            label: "Bridge approval",
+            step: "status.cctp.approve",
+            chainId: MAINNET_CHAIN_ID,
+          });
+        }
+
+        const cctpMaxFee = ZERO_AMOUNT;
+        const bridgeRecipientBytes = toBytes32(recipient);
+        const bridgeArgs = [
+          redeemedAmount,
+          CCTP_LINEA_DOMAIN,
+          bridgeRecipientBytes,
+          exitStablecoinAddress,
+          ZERO_BYTES32,
+          cctpMaxFee,
+          CCTP_STANDARD_FINALITY_THRESHOLD,
+        ] as const;
+
+        setTxStep("submitting");
+        console.info("CCTP bridge call", {
+          functionName: "depositForBurn",
+          address: CCTP_TOKEN_MESSENGER_V2_ADDRESS,
+          chainId: MAINNET_CHAIN_ID,
+          args: bridgeArgs,
+        });
+        const bridgeRequest = {
+          address: CCTP_TOKEN_MESSENGER_V2_ADDRESS,
+          chainId: MAINNET_CHAIN_ID,
+          functionName: "depositForBurn",
+          args: bridgeArgs,
+        } as const satisfies StatusTxReviewRequest;
+        const bridgeHash = await submitReviewedStatusWrite(
+          "status.cctp.bridge",
+          bridgeRequest,
+          () =>
+            writeContractAsync({
+              abi: cctpTokenMessengerV2Abi,
+              address: CCTP_TOKEN_MESSENGER_V2_ADDRESS,
+              chainId: MAINNET_CHAIN_ID,
+              functionName: "depositForBurn",
+              args: bridgeArgs,
+            }),
+        );
+        if (!bridgeHash) {
+          return;
+        }
+        notifyTxSubmitted(
+          "USDC bridge",
+          bridgeHash,
+          undefined,
+          MAINNET_CHAIN_ID,
+        );
+        await waitForReviewedStatusReceipt({
+          hash: bridgeHash,
+          label: "USDC bridge",
+          step: "status.cctp.bridge",
+          chainId: MAINNET_CHAIN_ID,
+        });
+
+        const now = Date.now();
+        setCctpBridgeRecords((current) =>
+          upsertCctpBridgeRecord(current, {
+            txHash: bridgeHash,
+            account: accountAddress,
+            amount: redeemedAmount.toString(),
+            recipient,
+            sourceDomain: CCTP_ETHEREUM_DOMAIN,
+            destinationDomain: CCTP_LINEA_DOMAIN,
+            status: "submitted",
+            createdAt: now,
+            updatedAt: now,
+          }),
+        );
+        clearProgress();
+      } else if (exitTicker === "USDT") {
+        const bridgeAllowance = await statusClient.readContract({
+          abi: erc20Abi,
+          address: exitStablecoinAddress,
+          functionName: "allowance",
+          args: [accountAddress, LINEA_TOKEN_BRIDGE_ADDRESS],
+        });
+
+        if (bridgeAllowance < redeemedAmount) {
+          setTxStep("approving");
+          if (bridgeAllowance > ZERO_AMOUNT) {
+            const resetHash = await writeContractAsync({
+              abi: erc20Abi,
+              address: exitStablecoinAddress,
+              chainId: MAINNET_CHAIN_ID,
+              functionName: "approve",
+              args: [LINEA_TOKEN_BRIDGE_ADDRESS, ZERO_AMOUNT],
+            });
+            notifyTxSubmitted("Bridge approval reset", resetHash);
+            await waitForFollowUpTransactionReceipt(publicClient, resetHash);
+            notifyTxConfirmed("Bridge approval reset", resetHash);
+          }
+
+          console.info("Linea USDT approval call", {
+            functionName: "approve",
+            address: exitStablecoinAddress,
+            chainId: MAINNET_CHAIN_ID,
+            args: [LINEA_TOKEN_BRIDGE_ADDRESS, redeemedAmount],
+          });
+          const approvalHash = await writeContractAsync({
+            abi: erc20Abi,
+            address: exitStablecoinAddress,
+            chainId: MAINNET_CHAIN_ID,
+            functionName: "approve",
+            args: [LINEA_TOKEN_BRIDGE_ADDRESS, redeemedAmount],
+          });
+          notifyTxSubmitted("Bridge approval", approvalHash);
+          await waitForFollowUpTransactionReceipt(publicClient, approvalHash);
+          notifyTxConfirmed("Bridge approval", approvalHash);
+        }
+
+        setTxStep("submitting");
+        const bridgeFee = await readLineaTokenBridgeFee(statusClient);
+        console.info("Linea TokenBridge call", {
+          functionName: "bridgeToken",
+          address: LINEA_TOKEN_BRIDGE_ADDRESS,
+          chainId: MAINNET_CHAIN_ID,
+          args: [exitStablecoinAddress, redeemedAmount, recipient],
+          value: bridgeFee,
+        });
+        const bridgeHash = await writeContractAsync({
+          abi: lineaTokenBridgeAbi,
+          address: LINEA_TOKEN_BRIDGE_ADDRESS,
+          chainId: MAINNET_CHAIN_ID,
+          functionName: "bridgeToken",
+          args: [exitStablecoinAddress, redeemedAmount, recipient],
+          value: bridgeFee,
+        });
+        notifyTxSubmitted("Linea bridge", bridgeHash);
+        await waitForFollowUpTransactionReceipt(publicClient, bridgeHash);
+        const now = Date.now();
+        setLineaNativeBridgeRecords((current) =>
+          upsertLineaNativeBridgeRecord(current, {
+            txHash: bridgeHash,
+            account: accountAddress,
+            token: exitStablecoinAddress,
+            ticker: exitTicker,
+            amount: redeemedAmount.toString(),
+            recipient,
+            status: "submitted",
+            createdAt: now,
+            updatedAt: now,
+          }),
+        );
+        pushAlert({
+          type: "info",
+          title: "Linea bridge pending claim",
+          message: buildLineaNativeBridgeMessage(bridgeHash),
+          duration: 12_000,
+        });
+        clearProgress();
+      }
+
+      setFromAmount("");
+      await refetchStatusExitBalances();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Status withdrawal failed";
+      setTxError(message);
+      pushAlert({
+        type: "error",
+        title: "Status withdrawal failed",
+        message,
+      });
+    } finally {
+      setTxStep("idle");
+    }
+  };
+
   const handlePrimaryAction = async () => {
     if (!accountAddress) {
       return;
@@ -2945,68 +5248,93 @@ export function DepositSwap() {
       return;
     }
 
-    if (isPredepositRedeem) {
+    if (primaryActionInFlightRef.current) {
       return;
     }
 
-    if (isDepositFlow && isCitreaDeposit && isAutoStakeFlowInProgress) {
-      return;
-    }
+    primaryActionInFlightRef.current = true;
 
-    if (isCitreaReturnFlow && isOnMainnet && !citreaReturnReadyForRedeem) {
-      if (!citreaReturnPending && !citreaReturnFinal && switchChainAsync) {
-        await switchChainAsync({ chainId: CITREA_CHAIN_ID_NUMBER });
-      }
-      return;
-    }
-
-    if (shouldSwitchChain) {
-      if (switchChainAsync) {
-        await switchChainAsync({ chainId: requiredChainId });
-      }
-      return;
-    }
-
-    if (insufficientBalance) {
-      return;
-    }
-
-    if (
-      !isDepositFlow &&
-      shouldUseVaultPreview &&
-      (isRedeemQuotePending || isRedeemQuoteUnavailable)
-    ) {
-      return;
-    }
-
-    if (
-      !isDepositFlow &&
-      shouldGuardRedeemLiquidity &&
-      (redeemLiquidityState.phase === "loading" ||
-        redeemLiquidityState.phase === "insufficient" ||
-        redeemLiquidityState.phase === "unavailable")
-    ) {
-      return;
-    }
-
-    if (isDepositFlow) {
-      await handleDeposit();
-      return;
-    }
-
-    if (isCitreaReturnFlow) {
-      if (isOnMainnet) {
-        if (!citreaReturnReadyForRedeem) {
+    try {
+      if (isPredepositRedeem && pendingCctpRecord) {
+        if (
+          pendingCctpAttestationReady &&
+          activeChainId === LINEA_CHAIN_ID &&
+          isPendingCctpRecipientMismatch
+        ) {
+          handleOpenRecipientWalletPrompt();
           return;
         }
-        await handleRedeem();
-      } else {
-        await handleCitreaReturn();
-      }
-      return;
-    }
 
-    await handleRedeem();
+        await handleClaimCctpOnLinea();
+        return;
+      }
+
+      if (isDepositFlow && isCitreaDeposit && isAutoStakeFlowInProgress) {
+        return;
+      }
+
+      if (isCitreaReturnFlow && isOnMainnet && !citreaReturnReadyForRedeem) {
+        if (!citreaReturnPending && !citreaReturnFinal && switchChainAsync) {
+          await switchChainAsync({ chainId: CITREA_CHAIN_ID_NUMBER });
+        }
+        return;
+      }
+
+      if (shouldSwitchChain) {
+        if (switchChainAsync) {
+          await switchChainAsync({ chainId: requiredChainId });
+        }
+        return;
+      }
+
+      if (insufficientBalance && !statusTxReviewHasSkip("balance")) {
+        return;
+      }
+
+      if (
+        !isDepositFlow &&
+        shouldUseVaultPreview &&
+        (isRedeemQuotePending || isRedeemQuoteUnavailable)
+      ) {
+        return;
+      }
+
+      if (
+        !isDepositFlow &&
+        shouldGuardRedeemLiquidity &&
+        (redeemLiquidityState.phase === "loading" ||
+          redeemLiquidityState.phase === "insufficient" ||
+          redeemLiquidityState.phase === "unavailable")
+      ) {
+        return;
+      }
+
+      if (isDepositFlow) {
+        await handleDeposit();
+        return;
+      }
+
+      if (isPredepositRedeem) {
+        await handleStatusExit();
+        return;
+      }
+
+      if (isCitreaReturnFlow) {
+        if (isOnMainnet) {
+          if (!citreaReturnReadyForRedeem) {
+            return;
+          }
+          await handleRedeem();
+        } else {
+          await handleCitreaReturn();
+        }
+        return;
+      }
+
+      await handleRedeem();
+    } finally {
+      primaryActionInFlightRef.current = false;
+    }
   };
 
   const handleStakeAction = async () => {
@@ -3078,7 +5406,7 @@ export function DepositSwap() {
         args: [unstakeParsedAmount, accountAddress, accountAddress],
       });
       notifyTxSubmitted("Unstake", redeemHash);
-      await publicClient.waitForTransactionReceipt({ hash: redeemHash });
+      await waitForFollowUpTransactionReceipt(publicClient, redeemHash);
       notifyTxConfirmed("Unstake", redeemHash);
 
       setUnstakeAmount("");
@@ -3121,9 +5449,18 @@ export function DepositSwap() {
         ? "Ethereum"
         : "Citrea"
       : "Ethereum";
-  const toChainLabel = isDepositFlow ? depositToChainLabel : "Ethereum";
-  const fromAssetLabelOverride =
-    !isDepositFlow && isCitreaReturnFlow && fromAssetType === "gusd"
+  const toChainLabel = isPredepositRedeem
+    ? LINEA_CHAIN_LABEL
+    : isDepositFlow
+      ? depositToChainLabel
+      : "Ethereum";
+  const fromAssetLabelOverride = isPredepositRedeem
+    ? isStatusExitCollateralResume
+      ? selectedTicker
+      : isStatusExitGunitResume
+        ? "GUnits"
+        : "Status predeposit"
+    : !isDepositFlow && isCitreaReturnFlow && fromAssetType === "gusd"
       ? isOnMainnet
         ? "GUSD"
         : "Citrea GUSD"
@@ -3137,7 +5474,11 @@ export function DepositSwap() {
   ) => {
     if (assetType === "stablecoin") {
       return (
-        <Select value={selectedTicker} onValueChange={handleStablecoinChange}>
+        <Select
+          value={selectedTicker}
+          onValueChange={handleStablecoinChange}
+          disabled={Boolean(statusExitProgress)}
+        >
           <SelectTrigger className="h-11 w-fit justify-start gap-2 px-3">
             {selectedStablecoin ? (
               <TokenIcon
@@ -3297,6 +5638,7 @@ export function DepositSwap() {
                   inputProps={{
                     placeholder: fromPlaceholder,
                     autoComplete: "off",
+                    disabled: isPredepositRedeem,
                     value: fromAmount,
                     onChange: (event) => {
                       setPostMintHref(null);
@@ -3309,15 +5651,16 @@ export function DepositSwap() {
                     onClick: canUseMax ? handleMaxClick : undefined,
                   }}
                 />
-                <button
-                  type="button"
-                  onClick={handleSwitchDirection}
-                  disabled={!canSwitchDirection}
-                  aria-label="Switch direction"
-                  className="mx-auto flex h-10 w-10 items-center justify-center rounded-full border border-border/60 bg-background/80 text-muted-foreground shadow-sm transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <ArrowUpDown className="h-4 w-4" />
-                </button>
+                {canSwitchDirection ? (
+                  <button
+                    type="button"
+                    onClick={handleSwitchDirection}
+                    aria-label="Switch direction"
+                    className="mx-auto flex h-10 w-10 items-center justify-center rounded-full border border-border/60 bg-background/80 text-muted-foreground shadow-sm transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  >
+                    <ArrowUpDown className="h-4 w-4" />
+                  </button>
+                ) : null}
                 <SwapAssetPanel
                   label="To"
                   chainLabel={toChainLabel}
@@ -3333,6 +5676,82 @@ export function DepositSwap() {
                   }}
                 />
               </div>
+              {isPredepositRedeem ? (
+                <div className="space-y-4 rounded-2xl border border-border/60 bg-background/70 p-4">
+                  <div className="space-y-1">
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
+                      Bridge to Linea Mainnet
+                    </p>
+                    <a
+                      href={STATUS_LINEA_ANNOUNCEMENT_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex text-xs font-medium text-foreground underline underline-offset-4"
+                    >
+                      Read the Status announcement
+                    </a>
+                  </div>
+                  <div className="space-y-3">
+                    <label
+                      htmlFor="linea-recipient-address"
+                      className="block text-xs font-medium text-foreground"
+                    >
+                      Recipient on Linea Mainnet
+                    </label>
+                    <input
+                      id="linea-recipient-address"
+                      type="text"
+                      inputMode="text"
+                      placeholder="0x..."
+                      value={lineaRecipientInput}
+                      disabled={isLineaRecipientInteractionDisabled}
+                      aria-describedby="linea-recipient-help"
+                      onChange={(event) => {
+                        setLineaRecipientInput(event.target.value);
+                        setLineaRecipientTouched(true);
+                        setLineaRecipientConfirmed(false);
+                      }}
+                      className={cn(
+                        "h-10 w-full rounded-xl border border-border/80 bg-muted/30 px-3 font-mono text-[11px] text-foreground outline-none transition placeholder:text-muted-foreground/60 focus:border-primary/60 focus:bg-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-70",
+                        lineaRecipientInput &&
+                          !isLineaRecipientValid &&
+                          "border-destructive/60 focus:border-destructive/70",
+                      )}
+                    />
+                    <p
+                      id="linea-recipient-help"
+                      className="text-xs leading-relaxed text-muted-foreground"
+                    >
+                      Funds will be bridged to this address on Linea Mainnet.
+                      Make sure you can access it there, especially if this
+                      wallet is a multisig or contract.
+                    </p>
+                    <label className="flex items-start gap-2 rounded-xl border border-border/60 bg-background/70 p-3 text-xs font-medium text-foreground">
+                      <input
+                        type="checkbox"
+                        checked={lineaRecipientConfirmed}
+                        disabled={
+                          isLineaRecipientInteractionDisabled ||
+                          !isLineaRecipientValid
+                        }
+                        onChange={(event) =>
+                          setLineaRecipientConfirmed(event.target.checked)
+                        }
+                        className="mt-0.5 h-4 w-4 rounded border-border text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed"
+                      />
+                      <span>
+                        I control this recipient on Linea Mainnet and understand
+                        bridged funds will be sent there.
+                      </span>
+                    </label>
+                    {lineaRecipientInput && !isLineaRecipientValid ? (
+                      <p className="text-xs text-destructive">
+                        Enter a valid EVM address.
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
               {isDepositFlow && depositRoute === "citrea" ? (
                 <div className="rounded-2xl border border-border/60 bg-background/70 p-4">
                   <div className="flex items-center justify-between gap-4">
@@ -3408,6 +5827,143 @@ export function DepositSwap() {
                     pendingBridgeStatusLabel.slice(1)}
                 </p>
               ) : null}
+              {isPredepositRedeem && pendingCctpRecord ? (
+                <div className="space-y-2 text-center text-xs text-muted-foreground">
+                  <p>
+                    {pendingCctpRecord.status === "submitted"
+                      ? getCctpSubmittedMessage(
+                          pendingCctpRecord.attestationStatus,
+                        )
+                      : activeChainId === LINEA_CHAIN_ID
+                        ? "Attestation ready. Waiting for USDC to arrive on Linea. You can finalize manually if needed."
+                        : "Attestation ready. USDC may arrive automatically; switch to Linea only if you need to finalize manually."}
+                  </p>
+                  {hasNoLineaClaimGas ? (
+                    <div className="rounded-xl border border-amber-300/70 bg-amber-50 px-3 py-2 text-left text-amber-950">
+                      <p>
+                        This wallet needs ETH on Linea to pay gas before manual
+                        finalization.
+                      </p>
+                      <a
+                        href={LINEA_BRIDGE_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-1 inline-flex font-medium text-amber-950 underline underline-offset-4"
+                      >
+                        Bridge ETH to Linea
+                      </a>
+                    </div>
+                  ) : null}
+                  {isPendingCctpRecipientMismatch && accountAddress ? (
+                    <div className="space-y-2 rounded-xl border border-amber-300/70 bg-amber-50 px-3 py-2 text-left text-amber-950">
+                      <p>
+                        Claiming can be submitted from this wallet, but the
+                        funds will arrive at the Linea recipient.
+                      </p>
+                      {pendingCctpAttestationReady &&
+                      activeChainId === LINEA_CHAIN_ID ? (
+                        <button
+                          type="button"
+                          onClick={handleClaimCctpOnLinea}
+                          disabled={
+                            txStep === "submitting" || hasNoLineaClaimGas
+                          }
+                          className="font-medium text-amber-950 underline underline-offset-4 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Finalize to recipient from this wallet
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {pendingCctpRecord.status === "submitted" ? (
+                    <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
+                      <a
+                        href={`https://etherscan.io/tx/${pendingCctpRecord.txHash}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-medium text-foreground underline underline-offset-4"
+                      >
+                        View Ethereum tx
+                      </a>
+                      <a
+                        href={getCctpStatusHref(pendingCctpRecord)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-medium text-foreground underline underline-offset-4"
+                      >
+                        Circle status
+                      </a>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+              {isPredepositRedeem &&
+              !pendingCctpRecord &&
+              latestMintedCctpRecord ? (
+                <div className="space-y-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-center text-xs text-emerald-950">
+                  <p>
+                    {latestMintedCctpRecord.completionSource === "manual"
+                      ? "USDC was delivered on Linea."
+                      : "USDC was delivered on Linea automatically. No extra claim transaction was needed."}
+                  </p>
+                  <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
+                    {latestMintedCctpRecord.mintTxHash ? (
+                      <a
+                        href={`https://lineascan.build/tx/${latestMintedCctpRecord.mintTxHash}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-medium text-emerald-950 underline underline-offset-4"
+                      >
+                        View Linea tx
+                      </a>
+                    ) : null}
+                    <a
+                      href={getCctpStatusHref(latestMintedCctpRecord)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium text-emerald-950 underline underline-offset-4"
+                    >
+                      Circle status
+                    </a>
+                  </div>
+                </div>
+              ) : null}
+              {isPredepositRedeem && statusExitProgress ? (
+                <div className="rounded-xl border border-border/60 bg-background/70 p-3 text-center text-xs text-muted-foreground">
+                  {statusExitProgress.stage === "gunit"
+                    ? "Predeposit withdrawal confirmed. Continue by redeeming GUSD for your collateral."
+                    : `Status collateral redeemed. Continue bridging the stored ${statusExitProgress.ticker} amount to Linea.`}
+                </div>
+              ) : null}
+              {isPredepositRedeem && pendingLineaNativeBridgeRecord ? (
+                <div className="space-y-2 rounded-xl border border-border/60 bg-background/70 p-3 text-center text-xs text-muted-foreground">
+                  <p>
+                    {pendingLineaNativeBridgeRecord.ticker} bridge pending
+                    destination claim. The Ethereum bridge transaction is
+                    confirmed, and the Linea side usually takes{" "}
+                    {LINEA_NATIVE_BRIDGE_ESTIMATE}. It may still need to be
+                    claimed before funds arrive.
+                  </p>
+                  <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
+                    <a
+                      href={LINEA_BRIDGE_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium text-foreground underline underline-offset-4"
+                    >
+                      Open Linea bridge
+                    </a>
+                    <a
+                      href={LINEASCAN_L1_TO_L2_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium text-foreground underline underline-offset-4"
+                    >
+                      Track on LineaScan
+                    </a>
+                  </div>
+                </div>
+              ) : null}
               {!pendingBridgeForRoute &&
               isCitreaReturnFlow &&
               citreaReturnFinal ? (
@@ -3419,12 +5975,6 @@ export function DepositSwap() {
                     : `Bridge ${citreaReturnStatusLabel
                         .replace(/^./, (char) => char.toUpperCase())
                         .trim()}.`}
-                </p>
-              ) : null}
-              {!txError && insufficientBalance ? (
-                <p className="text-center text-xs text-destructive">
-                  Amount exceeds available balance. Click your balance to use
-                  the max.
                 </p>
               ) : null}
               {txError ? (

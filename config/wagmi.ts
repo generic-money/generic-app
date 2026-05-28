@@ -27,7 +27,32 @@ const citrea = defineChain({
   },
 });
 
-export const networks: [AppKitNetwork, ...AppKitNetwork[]] = [mainnet, citrea];
+const linea = defineChain({
+  id: 59144,
+  name: "Linea",
+  network: "linea",
+  nativeCurrency: {
+    name: "Ether",
+    symbol: "ETH",
+    decimals: 18,
+  },
+  rpcUrls: {
+    default: { http: ["https://rpc.linea.build"] },
+    public: { http: ["https://rpc.linea.build"] },
+  },
+  blockExplorers: {
+    default: {
+      name: "LineaScan",
+      url: "https://lineascan.build",
+    },
+  },
+});
+
+export const networks: [AppKitNetwork, ...AppKitNetwork[]] = [
+  mainnet,
+  citrea,
+  linea,
+];
 export const defaultNetwork = mainnet;
 
 // Set up the Wagmi Adapter (Config)

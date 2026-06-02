@@ -98,6 +98,14 @@ test("sorts vaults using the selectable asset order", () => {
   ).toEqual(["USDC", "USDT"]);
 });
 
+test("sorts Status redeem vaults with USDT before USDC", () => {
+  expect(
+    sortLiquidityVaults([usdcVault, usdtVault], ["USDT", "USDC"]).map(
+      (vault) => vault.ticker,
+    ),
+  ).toEqual(["USDT", "USDC"]);
+});
+
 test("formats vault availability using vault decimals", () => {
   expect(formatVaultAvailability(usdcVault)).toBe("10");
 });

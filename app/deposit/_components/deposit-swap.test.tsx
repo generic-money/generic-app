@@ -222,6 +222,9 @@ const CCTP_MESSAGE_WITH_NONCE = `0x${"00".repeat(12)}${CCTP_MESSAGE_NONCE.slice(
 const GENERIC_UNIT = "0x8c307baDbd78bEa5A1cCF9677caa58e7A2172502";
 const USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
 const USDC_VAULT = "0x4825eFF24F9B7b76EEAFA2ecc6A1D5dFCb3c1c3f";
+const USDT = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
+const USDT_VAULT = "0xB8280955aE7b5207AF4CDbdCd775135Bd38157fE";
+const LINEA_TOKEN_BRIDGE = "0x051F1D88f0aF5763fB888eC4378b4D8B29ea3319";
 
 const setOpportunityRoute = (
   route: "predeposit" | "citrea",
@@ -312,6 +315,7 @@ beforeEach(() => {
 test("defaults Status to withdraw-only while deposits are paused", () => {
   render(<DepositSwap />);
 
+  expect(screen.getByPlaceholderText("Amount in USDT")).toBeInTheDocument();
   expect(
     screen.getByRole("button", { name: /connect wallet/i }),
   ).toBeDisabled();
@@ -338,6 +342,7 @@ test("keeps the Citrea deposit CTA unaffected", () => {
 
   render(<DepositSwap />);
 
+  expect(screen.getByPlaceholderText("Amount in USDC")).toBeInTheDocument();
   expect(
     screen.getByRole("button", { name: /connect wallet/i }),
   ).toBeDisabled();
@@ -366,9 +371,9 @@ test("requires recipient confirmation before enabling Status withdrawals", async
   hookMocks.useRedeemVaultLiquidity.mockReturnValue({
     status: "idle",
     selectedVault: {
-      ticker: "USDC",
-      tokenAddress: "0x0000000000000000000000000000000000000001",
-      vaultAddress: "0x0000000000000000000000000000000000000002",
+      ticker: "USDT",
+      tokenAddress: USDT,
+      vaultAddress: USDT_VAULT,
       decimals: 6,
       availableAmountRaw: "1000000",
       availableFormatted: "1",
@@ -435,9 +440,9 @@ test("keeps edited Status Linea recipient after remount without confirming it", 
   hookMocks.useRedeemVaultLiquidity.mockReturnValue({
     status: "idle",
     selectedVault: {
-      ticker: "USDC",
-      tokenAddress: USDC,
-      vaultAddress: USDC_VAULT,
+      ticker: "USDT",
+      tokenAddress: USDT,
+      vaultAddress: USDT_VAULT,
       decimals: 6,
       availableAmountRaw: "1000000",
       availableFormatted: "1",
@@ -1090,11 +1095,11 @@ test("exposes URL-gated Status tx review helpers", async () => {
     expect.objectContaining({
       account: ACCOUNT,
       stage: "gunit",
-      ticker: "USDC",
+      ticker: "USDT",
       shares: "1000000",
       genericUnitTokenAddress: GENERIC_UNIT,
-      stablecoinAddress: USDC,
-      vaultAddress: USDC_VAULT,
+      stablecoinAddress: USDT,
+      vaultAddress: USDT_VAULT,
     }),
   );
   expect(consoleInfo).toHaveBeenCalledWith(
@@ -1135,9 +1140,9 @@ test("lets review mode skip the predeposit availability check", async () => {
   hookMocks.useRedeemVaultLiquidity.mockReturnValue({
     status: "idle",
     selectedVault: {
-      ticker: "USDC",
-      tokenAddress: USDC,
-      vaultAddress: USDC_VAULT,
+      ticker: "USDT",
+      tokenAddress: USDT,
+      vaultAddress: USDT_VAULT,
       decimals: 6,
       availableAmountRaw: "1000000",
       availableFormatted: "1",
@@ -1180,9 +1185,9 @@ test("logs Status tx review writes in transaction order", async () => {
   hookMocks.useRedeemVaultLiquidity.mockReturnValue({
     status: "idle",
     selectedVault: {
-      ticker: "USDC",
-      tokenAddress: USDC,
-      vaultAddress: USDC_VAULT,
+      ticker: "USDT",
+      tokenAddress: USDT,
+      vaultAddress: USDT_VAULT,
       decimals: 6,
       availableAmountRaw: "1000000",
       availableFormatted: "1",
@@ -1208,15 +1213,24 @@ test("logs Status tx review writes in transaction order", async () => {
         genericBalanceReads += 1;
         return genericBalanceReads === 1 ? BigInt(0) : BigInt(1_000_000);
       }
-      if (functionName === "balanceOf" && address === USDC) {
+      if (functionName === "balanceOf" && address === USDT) {
         stablecoinBalanceReads += 1;
         return stablecoinBalanceReads === 1 ? BigInt(0) : BigInt(1_000_000);
       }
-      if (functionName === "allowance" && args?.[1] === USDC_VAULT) {
+      if (functionName === "allowance" && args?.[1] === USDT_VAULT) {
+        return BigInt(0);
+      }
+      if (functionName === "allowance" && args?.[1] === LINEA_TOKEN_BRIDGE) {
         return BigInt(0);
       }
       if (functionName === "allowance") {
         return BigInt(1_000_000);
+      }
+      if (functionName === "messageService") {
+        return "0x0000000000000000000000000000000000009999";
+      }
+      if (functionName === "minimumFeeInWei") {
+        return BigInt(0);
       }
       if (functionName === "totalAssets") {
         return BigInt(1_000_000);
@@ -1251,6 +1265,9 @@ test("logs Status tx review writes in transaction order", async () => {
     )
     .mockResolvedValueOnce(
       "0x0000000000000000000000000000000000000000000000000000000000000004",
+    )
+    .mockResolvedValueOnce(
+      "0x0000000000000000000000000000000000000000000000000000000000000005",
     );
   wagmiMocks.useWriteContract.mockReturnValue({ writeContractAsync });
   const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
@@ -1263,7 +1280,7 @@ test("logs Status tx review writes in transaction order", async () => {
     screen.getByRole("button", { name: /withdraw, redeem & bridge/i }),
   );
 
-  await waitFor(() => expect(writeContractAsync).toHaveBeenCalledTimes(4));
+  await waitFor(() => expect(writeContractAsync).toHaveBeenCalledTimes(5));
   expect(writeContractAsync.mock.calls.map(([request]) => request)).toEqual([
     expect.objectContaining({
       address: "0x0503F2C5A1a4b72450c6Cfa790F2097CF5cB6a01",
@@ -1278,24 +1295,23 @@ test("logs Status tx review writes in transaction order", async () => {
     expect.objectContaining({
       address: GENERIC_UNIT,
       functionName: "approve",
-      args: [USDC_VAULT, BigInt(1_000_000)],
+      args: [USDT_VAULT, BigInt(1_000_000)],
     }),
     expect.objectContaining({
-      address: USDC_VAULT,
+      address: USDT_VAULT,
       functionName: "redeem",
       args: [BigInt(1_000_000), ACCOUNT, ACCOUNT],
     }),
     expect.objectContaining({
-      functionName: "depositForBurn",
-      args: [
-        BigInt(1_000_000),
-        11,
-        ACCOUNT_BYTES32,
-        USDC,
-        expect.any(String),
-        BigInt(0),
-        2000,
-      ],
+      address: USDT,
+      functionName: "approve",
+      args: [LINEA_TOKEN_BRIDGE, BigInt(1_000_000)],
+    }),
+    expect.objectContaining({
+      address: LINEA_TOKEN_BRIDGE,
+      functionName: "bridgeToken",
+      args: [USDT, BigInt(1_000_000), ACCOUNT],
+      value: BigInt(0),
     }),
   ]);
   expect(
@@ -1317,6 +1333,10 @@ test("logs Status tx review writes in transaction order", async () => {
       hash: "0x0000000000000000000000000000000000000000000000000000000000000004",
       confirmations: 2,
     },
+    {
+      hash: "0x0000000000000000000000000000000000000000000000000000000000000005",
+      confirmations: 2,
+    },
   ]);
   expect(
     consoleInfo.mock.calls
@@ -1327,7 +1347,8 @@ test("logs Status tx review writes in transaction order", async () => {
       "status.withdrawPredeposit",
       "status.redeem.approve",
       "status.redeem",
-      "status.cctp.bridge",
+      "status.linea.approve",
+      "status.linea.bridge",
     ]),
   );
 
@@ -1361,9 +1382,9 @@ test("pauses after each dry-submitted Status tx review write", async () => {
   hookMocks.useRedeemVaultLiquidity.mockReturnValue({
     status: "idle",
     selectedVault: {
-      ticker: "USDC",
-      tokenAddress: USDC,
-      vaultAddress: USDC_VAULT,
+      ticker: "USDT",
+      tokenAddress: USDT,
+      vaultAddress: USDT_VAULT,
       decimals: 6,
       availableAmountRaw: "1000000",
       availableFormatted: "1",
@@ -1456,7 +1477,7 @@ test("pauses after each dry-submitted Status tx review write", async () => {
       "status.withdrawPredeposit",
       "status.redeem.approve",
       "status.redeem",
-      "status.cctp.approve",
+      "status.linea.approve",
     ]),
   );
 
@@ -1467,8 +1488,8 @@ test("pauses after each dry-submitted Status tx review write", async () => {
       "status.withdrawPredeposit",
       "status.redeem.approve",
       "status.redeem",
-      "status.cctp.approve",
-      "status.cctp.bridge",
+      "status.linea.approve",
+      "status.linea.bridge",
     ]),
   );
   expect(drySubmitHashes()).toEqual([
@@ -1506,9 +1527,9 @@ test("guards the primary action against duplicate wallet prompts", async () => {
   hookMocks.useRedeemVaultLiquidity.mockReturnValue({
     status: "idle",
     selectedVault: {
-      ticker: "USDC",
-      tokenAddress: USDC,
-      vaultAddress: USDC_VAULT,
+      ticker: "USDT",
+      tokenAddress: USDT,
+      vaultAddress: USDT_VAULT,
       decimals: 6,
       availableAmountRaw: "1000000",
       availableFormatted: "1",

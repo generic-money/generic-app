@@ -289,6 +289,12 @@ const STATUS_DEPOSITS_PAUSED_MESSAGE =
   "Deposits on the Status networks are paused as the chain moves towards its next stage. Funds are safe, you'll hear next steps very soon.";
 const STATUS_LINEA_ANNOUNCEMENT_URL =
   "https://x.com/StatusL2/status/2049922023661695094";
+const DEPOSIT_DEFAULT_TICKER = "USDC" as const satisfies StablecoinTicker;
+const STATUS_REDEEM_DEFAULT_TICKER = "USDT" as const satisfies StablecoinTicker;
+const STATUS_REDEEM_STABLECOIN_ORDER: StablecoinTicker[] = [
+  STATUS_REDEEM_DEFAULT_TICKER,
+  DEPOSIT_DEFAULT_TICKER,
+];
 
 const buildCitreaBridgeParams = (receiver: HexBytes) =>
   Options.newOptions()
@@ -316,6 +322,22 @@ const parseStoredAmount = (value?: string) => {
 
 const formatTxHash = (hash: HexBytes) =>
   `${hash.slice(0, 6)}...${hash.slice(-4)}`;
+
+const sortStablecoinsByTickerOrder = <
+  TStablecoin extends { ticker: StablecoinTicker },
+>(
+  coins: TStablecoin[],
+  order: readonly StablecoinTicker[],
+) => {
+  const orderIndex = (ticker: StablecoinTicker) => {
+    const index = order.indexOf(ticker);
+    return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+  };
+
+  return [...coins].sort(
+    (left, right) => orderIndex(left.ticker) - orderIndex(right.ticker),
+  );
+};
 
 const getCctpMessageNonce = (message?: HexData) => {
   if (!message || !message.startsWith("0x")) {
@@ -787,7 +809,7 @@ const OPPORTUNITY_OPTIONS: OpportunityOption[] = [
     value: "predeposit",
     eyebrow: "Status L2 GUSD",
     title: "Status withdrawals",
-    description: "Withdraw predeposits into USDC or USDT",
+    description: "Withdraw predeposits into USDT or USDC",
     badge: "Withdrawals open",
     note: "Linea Mainnet",
     formDescription: "Withdraw your Status predeposit into collateral",
@@ -912,8 +934,13 @@ export function DepositSwap() {
       enabled: Boolean(accountAddress),
     },
   });
-  const [selectedTicker, setSelectedTicker] =
-    useState<StablecoinTicker>("USDC");
+  const isPredepositRedeem = !isDepositFlow && depositRoute === "predeposit";
+  const stablecoinDefaultTicker = isPredepositRedeem
+    ? STATUS_REDEEM_DEFAULT_TICKER
+    : DEPOSIT_DEFAULT_TICKER;
+  const [selectedTicker, setSelectedTicker] = useState<StablecoinTicker>(
+    () => stablecoinDefaultTicker,
+  );
   const [isVaultAvailabilityDialogOpen, setIsVaultAvailabilityDialogOpen] =
     useState(false);
   const [redeemSource, setRedeemSource] = useState<RedeemSource>("gusd");
@@ -926,14 +953,19 @@ export function DepositSwap() {
   const [lineaRecipientConfirmed, setLineaRecipientConfirmed] = useState(false);
   const previousLineaAccountRef = useRef<string | undefined>(undefined);
   const previousLineaRecipientSeedRef = useRef<string | undefined>(undefined);
-  const isPredepositRedeem = !isDepositFlow && depositRoute === "predeposit";
-  const selectableStablecoins = useMemo(
-    () =>
-      isPredepositRedeem
-        ? stablecoins.filter((coin) => coin.ticker !== "USDS")
-        : stablecoins,
-    [isPredepositRedeem, stablecoins],
+  const stablecoinDefaultContextRef = useRef(
+    isPredepositRedeem ? "status-redeem" : "standard",
   );
+  const selectableStablecoins = useMemo(() => {
+    if (!isPredepositRedeem) {
+      return stablecoins;
+    }
+
+    return sortStablecoinsByTickerOrder(
+      stablecoins.filter((coin) => coin.ticker !== "USDS"),
+      STATUS_REDEEM_STABLECOIN_ORDER,
+    );
+  }, [isPredepositRedeem, stablecoins]);
   const isMainnetRedeem =
     !isDepositFlow && !isCitreaReturnFlow && depositRoute === "mainnet";
   const isGunitRedeem = isMainnetRedeem && redeemSource === "gunit";
@@ -1027,15 +1059,30 @@ export function DepositSwap() {
   }, [flow, setFlow, shouldForceStatusWithdraw]);
 
   useEffect(() => {
+    const nextContext = isPredepositRedeem ? "status-redeem" : "standard";
+    if (stablecoinDefaultContextRef.current === nextContext) {
+      return;
+    }
+
+    stablecoinDefaultContextRef.current = nextContext;
+    if (statusExitProgress) {
+      return;
+    }
+
+    setSelectedTicker(stablecoinDefaultTicker);
+  }, [isPredepositRedeem, stablecoinDefaultTicker, statusExitProgress]);
+
+  useEffect(() => {
     if (selectableStablecoins.find((coin) => coin.ticker === selectedTicker)) {
       return;
     }
 
-    const nextTicker = selectableStablecoins[0]?.ticker ?? "USDC";
+    const nextTicker =
+      selectableStablecoins[0]?.ticker ?? stablecoinDefaultTicker;
     if (nextTicker !== selectedTicker) {
       setSelectedTicker(nextTicker);
     }
-  }, [selectedTicker, selectableStablecoins]);
+  }, [selectedTicker, selectableStablecoins, stablecoinDefaultTicker]);
 
   useEffect(() => {
     if (
@@ -2419,12 +2466,39 @@ export function DepositSwap() {
         const context = requireStatusExitContext();
         const amount = parseStatusTxReviewAmount(input.amount, "amount");
         const now = Date.now();
+        const recipient =
+          input.recipient ?? lineaRecipient ?? context.accountAddress;
+
+        if (selectedTicker === "USDT") {
+          const record = {
+            txHash: input.txHash,
+            account: context.accountAddress,
+            token: context.stablecoinAddress,
+            ticker: selectedTicker,
+            amount: amount.toString(),
+            recipient,
+            status: "submitted" as const,
+            createdAt: now,
+            updatedAt: now,
+          };
+
+          setLineaNativeBridgeRecords((current) =>
+            upsertLineaNativeBridgeRecord(current, record),
+          );
+          logStatusTxReviewEvent(statusTxReviewConfig, {
+            step: "status.manual.bridgeSubmitted",
+            phase: "manual-advance",
+            txHash: input.txHash,
+            state: { record },
+          });
+          return record;
+        }
+
         const record = {
           txHash: input.txHash,
           account: context.accountAddress,
           amount: amount.toString(),
-          recipient:
-            input.recipient ?? lineaRecipient ?? context.accountAddress,
+          recipient,
           sourceDomain: CCTP_ETHEREUM_DOMAIN,
           destinationDomain: CCTP_LINEA_DOMAIN,
           status: "submitted" as const,
@@ -5141,65 +5215,188 @@ export function DepositSwap() {
         );
         clearProgress();
       } else if (exitTicker === "USDT") {
-        const bridgeAllowance = await statusClient.readContract({
-          abi: erc20Abi,
-          address: exitStablecoinAddress,
-          functionName: "allowance",
-          args: [accountAddress, LINEA_TOKEN_BRIDGE_ADDRESS],
-        });
+        const bridgeApprovalResetDryReviewed =
+          statusTxReviewHasSkip("send") &&
+          statusTxReviewDrySubmittedStepsRef.current.has(
+            "status.linea.approveReset",
+          );
+        const bridgeApprovalDryReviewed =
+          statusTxReviewHasSkip("send") &&
+          statusTxReviewDrySubmittedStepsRef.current.has(
+            "status.linea.approve",
+          );
+        const bridgeAllowance =
+          statusTxReviewHasSkip("allowance") || bridgeApprovalDryReviewed
+            ? redeemedAmount
+            : bridgeApprovalResetDryReviewed
+              ? ZERO_AMOUNT
+              : await statusClient.readContract({
+                  abi: erc20Abi,
+                  address: exitStablecoinAddress,
+                  functionName: "allowance",
+                  args: [accountAddress, LINEA_TOKEN_BRIDGE_ADDRESS],
+                });
+
+        if (
+          statusTxReviewHasSkip("allowance") ||
+          bridgeApprovalResetDryReviewed ||
+          bridgeApprovalDryReviewed
+        ) {
+          logStatusTxReviewEvent(statusTxReviewConfig, {
+            step: "status.linea.allowance",
+            phase: "skipped",
+            reason: statusTxReviewHasSkip("allowance")
+              ? "gmSkip=allowance"
+              : bridgeApprovalDryReviewed
+                ? "gmSkip=send reviewed status.linea.approve"
+                : "gmSkip=send reviewed status.linea.approveReset",
+            state: { bridgeAllowance, redeemedAmount },
+          });
+        }
 
         if (bridgeAllowance < redeemedAmount) {
           setTxStep("approving");
           if (bridgeAllowance > ZERO_AMOUNT) {
-            const resetHash = await writeContractAsync({
-              abi: erc20Abi,
+            const resetArgs = [
+              LINEA_TOKEN_BRIDGE_ADDRESS,
+              ZERO_AMOUNT,
+            ] as const;
+            console.info("Linea USDT approval reset call", {
+              functionName: "approve",
+              address: exitStablecoinAddress,
+              chainId: MAINNET_CHAIN_ID,
+              args: resetArgs,
+            });
+            const resetRequest = {
               address: exitStablecoinAddress,
               chainId: MAINNET_CHAIN_ID,
               functionName: "approve",
-              args: [LINEA_TOKEN_BRIDGE_ADDRESS, ZERO_AMOUNT],
+              args: resetArgs,
+            } as const satisfies StatusTxReviewRequest;
+            const resetHash = await submitReviewedStatusWrite(
+              "status.linea.approveReset",
+              resetRequest,
+              () =>
+                writeContractAsync({
+                  abi: erc20Abi,
+                  address: exitStablecoinAddress,
+                  chainId: MAINNET_CHAIN_ID,
+                  functionName: "approve",
+                  args: resetArgs,
+                }),
+            );
+            if (!resetHash) {
+              return;
+            }
+            notifyTxSubmitted(
+              "Bridge approval reset",
+              resetHash,
+              undefined,
+              MAINNET_CHAIN_ID,
+            );
+            await waitForReviewedStatusReceipt({
+              hash: resetHash,
+              label: "Bridge approval reset",
+              step: "status.linea.approveReset",
+              chainId: MAINNET_CHAIN_ID,
             });
-            notifyTxSubmitted("Bridge approval reset", resetHash);
-            await waitForFollowUpTransactionReceipt(publicClient, resetHash);
-            notifyTxConfirmed("Bridge approval reset", resetHash);
           }
 
+          const approvalArgs = [
+            LINEA_TOKEN_BRIDGE_ADDRESS,
+            redeemedAmount,
+          ] as const;
           console.info("Linea USDT approval call", {
             functionName: "approve",
             address: exitStablecoinAddress,
             chainId: MAINNET_CHAIN_ID,
-            args: [LINEA_TOKEN_BRIDGE_ADDRESS, redeemedAmount],
+            args: approvalArgs,
           });
-          const approvalHash = await writeContractAsync({
-            abi: erc20Abi,
+          const approvalRequest = {
             address: exitStablecoinAddress,
             chainId: MAINNET_CHAIN_ID,
             functionName: "approve",
-            args: [LINEA_TOKEN_BRIDGE_ADDRESS, redeemedAmount],
+            args: approvalArgs,
+          } as const satisfies StatusTxReviewRequest;
+          const approvalHash = await submitReviewedStatusWrite(
+            "status.linea.approve",
+            approvalRequest,
+            () =>
+              writeContractAsync({
+                abi: erc20Abi,
+                address: exitStablecoinAddress,
+                chainId: MAINNET_CHAIN_ID,
+                functionName: "approve",
+                args: approvalArgs,
+              }),
+          );
+          if (!approvalHash) {
+            return;
+          }
+          notifyTxSubmitted(
+            "Bridge approval",
+            approvalHash,
+            undefined,
+            MAINNET_CHAIN_ID,
+          );
+          await waitForReviewedStatusReceipt({
+            hash: approvalHash,
+            label: "Bridge approval",
+            step: "status.linea.approve",
+            chainId: MAINNET_CHAIN_ID,
           });
-          notifyTxSubmitted("Bridge approval", approvalHash);
-          await waitForFollowUpTransactionReceipt(publicClient, approvalHash);
-          notifyTxConfirmed("Bridge approval", approvalHash);
         }
 
         setTxStep("submitting");
         const bridgeFee = await readLineaTokenBridgeFee(statusClient);
+        const bridgeArgs = [
+          exitStablecoinAddress,
+          redeemedAmount,
+          recipient,
+        ] as const;
         console.info("Linea TokenBridge call", {
           functionName: "bridgeToken",
           address: LINEA_TOKEN_BRIDGE_ADDRESS,
           chainId: MAINNET_CHAIN_ID,
-          args: [exitStablecoinAddress, redeemedAmount, recipient],
+          args: bridgeArgs,
           value: bridgeFee,
         });
-        const bridgeHash = await writeContractAsync({
-          abi: lineaTokenBridgeAbi,
+        const bridgeRequest = {
           address: LINEA_TOKEN_BRIDGE_ADDRESS,
           chainId: MAINNET_CHAIN_ID,
           functionName: "bridgeToken",
-          args: [exitStablecoinAddress, redeemedAmount, recipient],
+          args: bridgeArgs,
           value: bridgeFee,
+        } as const satisfies StatusTxReviewRequest;
+        const bridgeHash = await submitReviewedStatusWrite(
+          "status.linea.bridge",
+          bridgeRequest,
+          () =>
+            writeContractAsync({
+              abi: lineaTokenBridgeAbi,
+              address: LINEA_TOKEN_BRIDGE_ADDRESS,
+              chainId: MAINNET_CHAIN_ID,
+              functionName: "bridgeToken",
+              args: bridgeArgs,
+              value: bridgeFee,
+            }),
+          { bridgeFee },
+        );
+        if (!bridgeHash) {
+          return;
+        }
+        notifyTxSubmitted(
+          "Linea bridge",
+          bridgeHash,
+          undefined,
+          MAINNET_CHAIN_ID,
+        );
+        await waitForReviewedStatusReceipt({
+          hash: bridgeHash,
+          label: "Linea bridge",
+          step: "status.linea.bridge",
+          chainId: MAINNET_CHAIN_ID,
         });
-        notifyTxSubmitted("Linea bridge", bridgeHash);
-        await waitForFollowUpTransactionReceipt(publicClient, bridgeHash);
         const now = Date.now();
         setLineaNativeBridgeRecords((current) =>
           upsertLineaNativeBridgeRecord(current, {
